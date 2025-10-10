@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Auto React & Comment Bot</title>
+<title>Facebook Account Target Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 body{font-family:Arial;background:#1e1b2e;color:#fff;padding:20px;}
@@ -14,12 +14,12 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 </head>
 <body>
 
-<h2>Facebook Auto React & Comment Bot</h2>
+<h2>Facebook Account Auto React & Comment Bot</h2>
 
-<label>Your Facebook Token:</label>
+<label>Your Facebook Account Token:</label>
 <textarea id="token" rows="3"></textarea>
 
-<label>Target Account ID:</label>
+<label>Target ID (Friend/Page you can access):</label>
 <input id="targetId" placeholder="1234567890"/>
 
 <label>Reactions (comma separated, e.g., LIKE, LOVE, WOW):</label>
@@ -36,7 +36,7 @@ document.getElementById('startBot').addEventListener('click', async () => {
   const reactionsRaw = document.getElementById('reactions').value.trim();
 
   if (!token || !targetId || !reactionsRaw) {
-    Swal.fire('Missing Fields','Fill all inputs','error');
+    Swal.fire('Missing Fields','Please fill all inputs','error');
     return;
   }
 
@@ -52,7 +52,7 @@ document.getElementById('startBot').addEventListener('click', async () => {
     });
     const data = await resp.json();
     document.getElementById('result').textContent = JSON.stringify(data,null,2);
-    Swal.fire('Bot Activated','It will automatically react and comment "hi master" on new posts','success');
+    Swal.fire('Bot Activated','It will react and comment "hi master" on the target’s posts','success');
   } catch(err){
     document.getElementById('result').textContent = err.toString();
     Swal.fire('Error','Network or server error','error');
