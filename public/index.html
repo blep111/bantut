@@ -2,109 +2,61 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Facebook Reaction App</title>
+<title>Facebook Reaction Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/particles.js"></script>
 <style>
-body { font-family: Arial; background:#1e1b2e; color:#fff; margin:0; padding:0;}
-.container { max-width: 500px; margin:50px auto; padding:20px; background:#2a2540; border-radius:10px;}
-input, select, textarea, button { width:100%; margin:5px 0; padding:8px; border-radius:5px; border:none;}
-button { background:#8b5cf6; color:#fff; cursor:pointer;}
-button:hover { background:#7c3aed;}
-pre { background:#1f1b34; padding:12px; border-radius:8px; color:#fff; overflow-x:auto;}
-#tutorialModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; z-index:1000;}
-#tutorialContent { background:#2a2540; padding:20px; border-radius:10px; width:90%; max-width:400px; text-align:center;}
+body{font-family:Arial;background:#1e1b2e;color:#fff;padding:20px;}
+input,textarea,button{width:100%;margin:5px 0;padding:8px;border-radius:5px;border:none;}
+button{background:#8b5cf6;color:#fff;cursor:pointer;}
+button:hover{background:#7c3aed;}
+pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto;}
 </style>
 </head>
 <body>
 
-<div id="particles-js" style="position:fixed; top:0; left:0; width:100%; height:100%; z-index:-1;"></div>
+<h2>Facebook Reaction Bot</h2>
 
-<div class="container">
-<h2>React to Your Post</h2>
-
-<label>Facebook User/Page Token:</label>
+<label>Facebook Token:</label>
 <textarea id="token" rows="3"></textarea>
 
-<label>Post URL or ID:</label>
-<input id="postInput" placeholder="Paste full post URL or numeric ID"/>
+<label>Post IDs / URLs (comma separated):</label>
+<textarea id="posts" rows="3" placeholder="123456789, 987654321,..."></textarea>
 
 <label>Reaction:</label>
 <select id="reaction">
-  <option>LIKE</option>
-  <option>LOVE</option>
-  <option>WOW</option>
-  <option>HAHA</option>
-  <option>SAD</option>
-  <option>ANGRY</option>
+<option>LIKE</option><option>LOVE</option><option>WOW</option><option>HAHA</option><option>SAD</option><option>ANGRY</option>
 </select>
 
-<button id="send">Send Reaction</button>
+<button id="botSend">Run Bot</button>
 
 <pre id="result"></pre>
 
-<button id="tutorial-btn">How to use</button>
-</div>
-
-<div id="tutorialModal">
-  <div id="tutorialContent">
-    <h3>How to Use</h3>
-    <p>1. Paste your Facebook User/Page Token.</p>
-    <p>2. Paste the full Post URL or numeric Post ID.</p>
-    <p>3. Select the reaction and click "Send Reaction".</p>
-    <button id="gotItBtn">Got it!</button>
-  </div>
-</div>
-
 <script>
-function extractPostId(urlOrId) {
-  if (/^\d+$/.test(urlOrId)) return urlOrId;
-  const regexes = [
-    /posts\/(\d+)/, /story_fbid=(\d+)/, /fbid=(\d+)/, /photos\/a\/\d+\/(\d+)/
-  ];
-  for(const re of regexes){
-    const match = urlOrId.match(re);
-    if(match) return match[1];
-  }
+function extractPostId(urlOrId){
+  if(/^\d+$/.test(urlOrId)) return urlOrId;
+  const regexes=[/posts\/(\d+)/,/story_fbid=(\d+)/,/fbid=(\d+)/,/photos\/a\/\d+\/(\d+)/];
+  for(const re of regexes){ const m=urlOrId.match(re); if(m) return m[1]; }
   return null;
 }
 
-// Tutorial modal
-const tutorialModal = document.getElementById('tutorialModal');
-const tutorialBtn = document.getElementById('tutorial-btn');
-const gotItBtn = document.getElementById('gotItBtn');
+document.getElementById('botSend').addEventListener('click',async()=>{
+  const token=document.getElementById('token').value.trim();
+  const postsRaw=document.getElementById('posts').value.trim();
+  const reaction=document.getElementById('reaction').value;
+  if(!token||!postsRaw){ Swal.fire('Missing Fields','Please provide token and posts','error'); return; }
 
-tutorialBtn.addEventListener('click',()=>{tutorialModal.style.display='flex';});
-gotItBtn.addEventListener('click',()=>{tutorialModal.style.display='none';});
-tutorialModal.addEventListener('click', e=>{if(e.target===tutorialModal)tutorialModal.style.display='none';});
-document.addEventListener('keydown', e=>{if(e.key==='Escape')tutorialModal.style.display='none';});
+  const posts=postsRaw.split(',').map(p=>extractPostId(p.trim())).filter(p=>p);
+  if(posts.length===0){ Swal.fire('Invalid Posts','No valid post IDs found','error'); return; }
 
-// Particles.js
-particlesJS('particles-js',{
-  particles: { number:{ value:80, density:{enable:true,value_area:800}}, color:{value:"#8b5cf6"}, shape:{type:"circle"}, opacity:{value:0.5,random:true}, size:{value:3,random:true}, line_linked:{enable:true,distance:150,color:"#8b5cf6",opacity:0.2,width:1}, move:{enable:true,speed:2,direction:"none",random:true,straight:false,out_mode:"out",bounce:false} },
-  interactivity:{ detect_on:"canvas", events:{ onhover:{ enable:true, mode:"repulse"}, onclick:{ enable:true, mode:"push"}, resize:true } }, retina_detect:true
-});
-
-// Reaction button
-document.getElementById('send').addEventListener('click', async () => {
-  const token = document.getElementById('token').value.trim();
-  const postInput = document.getElementById('postInput').value.trim();
-  const reaction = document.getElementById('reaction').value;
-  if(!token || !postInput){ Swal.fire('Missing Fields','Provide token and post URL/ID','error'); return; }
-
-  const postId = extractPostId(postInput);
-  if(!postId){ Swal.fire('Invalid Post','Could not extract Post ID','error'); return; }
-
-  document.getElementById('result').textContent = 'Sending...';
+  document.getElementById('result').textContent='Running bot...';
 
   try{
-    const resp = await fetch('/api/react',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token, postId, reaction }) });
-    const data = await resp.json();
-    document.getElementById('result').textContent = JSON.stringify(data,null,2);
-    if(data.success) Swal.fire('Success','Reaction posted!','success');
-    else Swal.fire('Failed',data.error,'error');
+    const resp=await fetch('/api/bot-react',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token,posts,reaction})});
+    const data=await resp.json();
+    document.getElementById('result').textContent=JSON.stringify(data,null,2);
+    Swal.fire('Bot Finished','Check result below','success');
   }catch(err){
-    document.getElementById('result').textContent = err.toString();
+    document.getElementById('result').textContent=err.toString();
     Swal.fire('Error','Network or server error','error');
   }
 });
