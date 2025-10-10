@@ -1,159 +1,184 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Token Manager + Multi Bot</title>
+<meta charset="utf-8" />
+<title>Debug Multi-Bot Manager</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
-  body{font-family:Arial;background:#0f1724;color:#e6eef8;padding:20px;}
-  .box{background:#071427;padding:16px;border-radius:8px;max-width:900px;margin:12px auto;}
-  input,textarea,button{width:100%;padding:8px;border-radius:6px;border:none;margin:6px 0;}
-  .row {display:flex; gap:12px;}
-  .col {flex:1;}
-  .small{width:120px;}
-  button.primary{background:#2563eb;color:white;cursor:pointer;}
-  button.warn{background:#ef4444;color:white;cursor:pointer;}
-  pre{background:#021022;padding:12px;border-radius:6px;overflow:auto;}
-  label{font-weight:600;}
-  table{width:100%;border-collapse:collapse;margin-top:8px;}
-  th,td{padding:8px;border-bottom:1px solid #183240;text-align:left;}
+  body{font-family:Arial;background:#071427;color:#dff3ff;padding:18px;}
+  .card{max-width:900px;margin:12px auto;background:#051226;padding:16px;border-radius:8px;}
+  input,textarea,button,select{width:100%;padding:8px;margin:8px 0;border-radius:6px;border:none;}
+  button.primary{background:#0ea5e9;color:#002a3a;padding:10px;border-radius:6px;cursor:pointer;}
+  button.danger{background:#ef4444;color:white;padding:8px;border-radius:6px;cursor:pointer;}
+  table{width:100%;border-collapse:collapse;}
+  th,td{padding:8px;border-bottom:1px solid #0b2a3a;text-align:left;}
+  pre{background:#021426;padding:10px;border-radius:6px;overflow:auto;}
 </style>
 </head>
 <body>
-  <div class="box">
-    <h2>Secure Token Store & Multi-Bot</h2>
+  <div class="card">
+    <h2>Token Store & Live Multi-Bot (debuggable)</h2>
 
-    <h3>Add Token (your own accounts only)</h3>
+    <h3>1) Add Token (only your own accounts)</h3>
     <label>Token</label>
-    <textarea id="newToken" placeholder="Paste full token here"></textarea>
+    <textarea id="newToken"></textarea>
     <label>Name (optional)</label>
-    <input id="newName" placeholder="Account name (e.g., acc1)"/>
+    <input id="newName" placeholder="e.g. acc1"/>
     <button id="addTokenBtn" class="primary">Add Token</button>
 
-    <h3>Stored Accounts</h3>
-    <div id="tokensArea">Loading tokens...</div>
+    <h3>2) Stored Tokens</h3>
+    <div id="tokensArea">Loading...</div>
 
-    <h3>Bot Controls</h3>
-    <label>Target ID (User/Page you can access)</label>
-    <input id="targetId" placeholder="Target ID (e.g. 1000123456789)"/>
-    <label>Reactions (comma separated)</label>
-    <input id="reactions" value="LIKE,LOVE,HAHA"/>
-    <label>Comment</label>
-    <input id="comment" value="hi master"/>
-
+    <h3>3) Token / Target Diagnostics</h3>
+    <label>Pick token (for tests)</label>
+    <select id="diagToken"></select>
     <div class="row">
-      <div class="col"><button id="startBotBtn" class="primary">Start Bot (selected accounts)</button></div>
-      <div class="col small"><button id="stopBotBtn" class="warn">Stop Bot</button></div>
+      <button id="testTokenBtn" class="primary">Test Token</button>
+    </div>
+    <label>Target ID to check</label>
+    <input id="diagTarget" placeholder="target id"/>
+    <button id="checkTargetBtn" class="primary">Check Target (what posts are visible to this token)</button>
+
+    <h3>4) Start Multi-Bot</h3>
+    <label>Choose stored accounts (checkboxes above), Target ID</label>
+    <input id="botTarget" placeholder="target id to monitor"/>
+    <label>Reactions (comma separated)</label>
+    <input id="botReactions" value="LIKE,LOVE,HAHA"/>
+    <label>Comment</label>
+    <input id="botComment" value="hi master"/>
+    <div style="display:flex;gap:8px;">
+      <button id="startBotBtn" class="primary">Start Bot</button>
+      <button id="stopBotBtn" class="danger">Stop Bot</button>
+      <button id="refreshStatusBtn" class="primary">Status</button>
+      <button id="viewLogsBtn" class="primary">View Logs</button>
     </div>
 
-    <h3>Status</h3>
-    <pre id="statusPre">No activity yet.</pre>
+    <h3>5) Output / Logs</h3>
+    <pre id="output">Ready.</pre>
   </div>
 
 <script>
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
 async function loadTokens() {
   const area = document.getElementById('tokensArea');
   area.innerHTML = 'Loading...';
   try {
-    const r = await fetch('/api/tokens');
-    const j = await r.json();
-    if (!j.success) { area.innerText = 'Failed to load tokens'; return; }
+    const j = await api('/api/tokens');
+    if (!j.success) { area.textContent = 'Failed loading tokens'; return; }
     if (j.tokens.length === 0) {
-      area.innerHTML = '<div>No tokens stored. Add one above.</div>';
+      area.innerHTML = '<div>No tokens stored.</div>';
+      document.getElementById('diagToken').innerHTML = '<option value="">-- none --</option>';
       return;
     }
-    // build table with checkboxes
-    const rows = j.tokens.map(t => `
-      <tr>
+    let html = '<table><thead><tr><th>Use</th><th>Name</th><th>Id</th><th>Created</th><th>Action</th></tr></thead><tbody>';
+    j.tokens.forEach(t => {
+      html += `<tr>
         <td><input type="checkbox" class="tokCheck" data-id="${t.id}"></td>
-        <td><strong>${escapeHtml(t.name)}</strong><br><small>${t.id}</small></td>
+        <td>${escapeHtml(t.name)}</td>
+        <td>${t.id}</td>
         <td>${t.createdAt}</td>
         <td><button class="delBtn" data-id="${t.id}">Remove</button></td>
-      </tr>
-    `).join('');
-    area.innerHTML = `<table><thead><tr><th>Use</th><th>Account</th><th>Created</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    area.innerHTML = html;
+    // populate diagToken select
+    const sel = document.getElementById('diagToken');
+    sel.innerHTML = '<option value="">-- select token --</option>';
+    j.tokens.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id; opt.textContent = `${t.name} (${t.id})`;
+      sel.appendChild(opt);
+    });
     document.querySelectorAll('.delBtn').forEach(btn => {
       btn.onclick = async () => {
-        const id = btn.getAttribute('data-id');
         if (!confirm('Remove token?')) return;
+        const id = btn.getAttribute('data-id');
         await fetch('/api/tokens/' + encodeURIComponent(id), { method: 'DELETE' });
         loadTokens();
       };
     });
   } catch (err) {
-    area.innerText = 'Error: ' + err.toString();
+    area.textContent = 'Error: ' + err.toString();
   }
-}
-
-function escapeHtml(s) {
-  if (!s) return '';
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 document.getElementById('addTokenBtn').addEventListener('click', async () => {
   const token = document.getElementById('newToken').value.trim();
   const name = document.getElementById('newName').value.trim();
-  if (!token) return Swal.fire('Error','Please paste the token','error');
-  try {
-    const r = await fetch('/api/add-token', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ token, name })
-    });
-    const j = await r.json();
-    if (j.success) {
-      Swal.fire('Saved','Token stored locally (encrypted)','success');
-      document.getElementById('newToken').value = '';
-      document.getElementById('newName').value = '';
-      loadTokens();
-    } else {
-      Swal.fire('Error', j.error || 'Failed to save', 'error');
-    }
-  } catch (err) {
-    Swal.fire('Error', err.toString(), 'error');
+  if (!token) return Swal.fire('Error','Token required','error');
+  const j = await api('/api/add-token', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, name })});
+  if (j.success) {
+    Swal.fire('Saved','Token stored locally (encrypted)','success');
+    document.getElementById('newToken').value = '';
+    document.getElementById('newName').value = '';
+    loadTokens();
+  } else {
+    Swal.fire('Error', j.error || 'Failed', 'error');
   }
 });
 
+// test token
+document.getElementById('testTokenBtn').addEventListener('click', async () => {
+  const sel = document.getElementById('diagToken').value;
+  if (!sel) return Swal.fire('Pick token','Select a token to test','error');
+  // fetch token list and find enc token via /api/tokens? We don't expose tokens; instead start-bot can use them.
+  // For testing, we will ask user to paste token when prompt appears (safer)
+  const token = prompt('Paste the token you want to test (or Cancel to test stored token by copying it here):');
+  if (!token) return;
+  document.getElementById('output').textContent = 'Testing token...';
+  const j = await api('/api/test-token', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token })});
+  document.getElementById('output').textContent = JSON.stringify(j, null, 2);
+});
+
+// check target visibility with a token
+document.getElementById('checkTargetBtn').addEventListener('click', async () => {
+  const token = prompt('Paste a token to use for checking target visibility:');
+  const target = document.getElementById('diagTarget').value.trim();
+  if (!token || !target) return Swal.fire('Error','Token and target required','error');
+  document.getElementById('output').textContent = 'Checking target...';
+  const j = await api('/api/check-target', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, targetId: target })});
+  document.getElementById('output').textContent = JSON.stringify(j, null, 2);
+});
+
+// start bot
 document.getElementById('startBotBtn').addEventListener('click', async () => {
   const checked = Array.from(document.querySelectorAll('.tokCheck:checked')).map(cb => cb.getAttribute('data-id'));
-  if (checked.length === 0) return Swal.fire('Select accounts','Please select at least one stored account','error');
-  const targetId = document.getElementById('targetId').value.trim();
-  const reactions = document.getElementById('reactions').value.trim().split(',').map(s=>s.trim()).filter(Boolean);
-  const comment = document.getElementById('comment').value.trim();
-  if (!targetId || reactions.length === 0) return Swal.fire('Error','Target ID and reactions required','error');
-
-  document.getElementById('statusPre').textContent = 'Starting bot...';
-  try {
-    const r = await fetch('/api/start-bot', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tokenIds: checked, targetId, reactions, comment })
-    });
-    const j = await r.json();
-    document.getElementById('statusPre').textContent = JSON.stringify(j, null, 2);
-    if (j.success) Swal.fire('Bot started', j.message, 'success');
-  } catch (err) {
-    document.getElementById('statusPre').textContent = err.toString();
-    Swal.fire('Error', err.toString(), 'error');
-  }
+  if (checked.length === 0) return Swal.fire('Error','Select stored accounts to use','error');
+  const target = document.getElementById('botTarget').value.trim();
+  if (!target) return Swal.fire('Error','Enter target id','error');
+  const reactions = document.getElementById('botReactions').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if (reactions.length === 0) return Swal.fire('Error','Enter reactions','error');
+  const comment = document.getElementById('botComment').value.trim();
+  document.getElementById('output').textContent = 'Starting bot...';
+  const j = await api('/api/start-bot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tokenIds: checked, targetId: target, reactions, comment })});
+  document.getElementById('output').textContent = JSON.stringify(j, null, 2);
+  if (j.success) Swal.fire('Started', j.message, 'success');
 });
 
+// stop
 document.getElementById('stopBotBtn').addEventListener('click', async () => {
-  const targetId = document.getElementById('targetId').value.trim();
-  if (!targetId) return Swal.fire('Error','Enter targetId to stop','error');
-  try {
-    const r = await fetch('/api/stop-bot', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ targetId })
-    });
-    const j = await r.json();
-    document.getElementById('statusPre').textContent = JSON.stringify(j, null, 2);
-    Swal.fire('Stopped', j.message, 'info');
-  } catch (err) {
-    document.getElementById('statusPre').textContent = err.toString();
-    Swal.fire('Error', err.toString(), 'error');
-  }
+  const t = document.getElementById('botTarget').value.trim();
+  if (!t) return Swal.fire('Error','Enter target id','error');
+  const j = await api('/api/stop-bot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ targetId: t })});
+  document.getElementById('output').textContent = JSON.stringify(j, null, 2);
+  Swal.fire('Stopped', j.message, 'info');
 });
 
-// initial load
+// status & logs
+document.getElementById('refreshStatusBtn').addEventListener('click', async () => {
+  const j = await api('/api/status');
+  document.getElementById('output').textContent = JSON.stringify(j, null, 2);
+});
+document.getElementById('viewLogsBtn').addEventListener('click', async () => {
+  const j = await api('/api/logs');
+  document.getElementById('output').textContent = JSON.stringify(j, null, 2);
+});
+
 loadTokens();
 </script>
 </body>
