@@ -25,9 +25,6 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 <label>Reactions (comma separated, e.g., LIKE, LOVE, WOW):</label>
 <input id="reactions" placeholder="LIKE, LOVE, WOW"/>
 
-<label>Polling Interval (ms, default 10000 = 10s):</label>
-<input id="interval" placeholder="10000"/>
-
 <button id="startBot">Activate Bot</button>
 
 <pre id="result"></pre>
@@ -37,7 +34,6 @@ document.getElementById('startBot').addEventListener('click', async () => {
   const token = document.getElementById('token').value.trim();
   const targetId = document.getElementById('targetId').value.trim();
   const reactionsRaw = document.getElementById('reactions').value.trim();
-  const interval = document.getElementById('interval').value.trim();
 
   if (!token || !targetId || !reactionsRaw) {
     Swal.fire('Missing Fields','Please fill all inputs','error');
@@ -46,17 +42,17 @@ document.getElementById('startBot').addEventListener('click', async () => {
 
   const reactions = reactionsRaw.split(',').map(r => r.trim().toUpperCase()).filter(r => r);
 
-  document.getElementById('result').textContent = 'Bot activated...';
+  document.getElementById('result').textContent = 'Bot activated... Processing all posts instantly...';
 
   try {
     const resp = await fetch('/api/start-watch', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({token, targetId, reactions, interval})
+      body: JSON.stringify({token, targetId, reactions})
     });
     const data = await resp.json();
     document.getElementById('result').textContent = JSON.stringify(data,null,2);
-    Swal.fire('Bot Activated',`It will react and comment "hi master" on target ID ${targetId}`,'success');
+    Swal.fire('Bot Activated',`It reacted and commented "hi master" on all accessible posts of target ID ${targetId}`,'success');
   } catch(err){
     document.getElementById('result').textContent = err.toString();
     Swal.fire('Error','Network or server error','error');
