@@ -4,7 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Facebook Boosting</title>
-<link rel="stylesheet" href="main.css">
+<style>
+/* ===== General ===== */
+body { margin:0; font-family: Arial, sans-serif; background: #1e1b2e; color: #fff; }
+nav { display:flex; justify-content:space-between; align-items:center; padding:1rem; background:#111; }
+nav h1 { font-size:1.5rem; color:#8b5cf6; }
+#token-list div { margin: 0.2rem 0; color: #8b5cf6; font-size:0.9rem; }
+main { padding: 2rem; max-width:800px; margin: auto; }
+input { padding: 0.5rem; margin-right: 0.5rem; border-radius:5px; border:none; width: 200px; }
+button { padding: 0.5rem 1rem; border:none; border-radius:5px; background:#8b5cf6; color:white; cursor:pointer; margin-top:0.5rem; }
+button:hover { background:#7c3aed; }
+section { margin-bottom: 2rem; }
+#status { margin-top: 1rem; font-weight:bold; color: #10b981; }
+
+/* ===== Sections ===== */
+#add-token, #bot-controls { display:flex; flex-wrap: wrap; gap: 0.5rem; }
+#add-token input, #bot-controls input { flex:1; min-width:150px; }
+#add-token button, #bot-controls button { flex-shrink:0; }
+</style>
 </head>
 <body>
 <nav>
@@ -28,6 +45,52 @@
   <section id="status"></section>
 </main>
 
-<script src="main.js"></script>
+<script>
+const tokenList = document.getElementById('token-list');
+const newTokenInput = document.getElementById('new-token');
+const addTokenBtn = document.getElementById('addTokenBtn');
+const startBotBtn = document.getElementById('startBotBtn');
+const stopBotBtn = document.getElementById('stopBotBtn');
+const targetIdInput = document.getElementById('targetId');
+const commentInput = document.getElementById('commentText');
+const statusEl = document.getElementById('status');
+
+const loadTokens = async () => {
+  const res = await fetch('/api/tokens');
+  const data = await res.json();
+  tokenList.innerHTML = data.tokens.map(t => `<div>${t.substring(0, 10)}...</div>`).join('');
+};
+
+addTokenBtn.addEventListener('click', async () => {
+  const token = newTokenInput.value.trim();
+  if (!token) return alert('Enter token');
+  await fetch('/api/token/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token })
+  });
+  newTokenInput.value = '';
+  loadTokens();
+});
+
+startBotBtn.addEventListener('click', async () => {
+  const targetId = targetIdInput.value.trim();
+  const commentText = commentInput.value.trim();
+  if (!targetId) return alert('Enter target ID');
+  await fetch('/api/bot/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetId, commentText })
+  });
+  statusEl.textContent = 'Bot running...';
+});
+
+stopBotBtn.addEventListener('click', async () => {
+  await fetch('/api/bot/stop', { method: 'POST' });
+  statusEl.textContent = 'Bot stopped';
+});
+
+loadTokens();
+</script>
 </body>
 </html>
