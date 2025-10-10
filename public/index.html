@@ -2,24 +2,32 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Facebook User Token Reaction</title>
+<title>Facebook Reaction App</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/particles.js"></script>
 <style>
-  body { font-family: Arial; padding: 20px; background: #1e1b2e; color: #fff; }
-  input, textarea, select, button { width: 100%; padding: 8px; margin: 5px 0; border-radius: 5px; border: none; }
-  button { background: #8b5cf6; color: #fff; cursor: pointer; }
-  button:hover { background: #7c3aed; }
-  pre { background: #2a2540; padding: 12px; border-radius: 8px; color: #fff; overflow-x: auto; }
+body { font-family: Arial; background:#1e1b2e; color:#fff; margin:0; padding:0;}
+.container { max-width: 500px; margin:50px auto; padding:20px; background:#2a2540; border-radius:10px;}
+input, select, textarea, button { width:100%; margin:5px 0; padding:8px; border-radius:5px; border:none;}
+button { background:#8b5cf6; color:#fff; cursor:pointer;}
+button:hover { background:#7c3aed;}
+pre { background:#1f1b34; padding:12px; border-radius:8px; color:#fff; overflow-x:auto;}
+#tutorialModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; z-index:1000;}
+#tutorialContent { background:#2a2540; padding:20px; border-radius:10px; width:90%; max-width:400px; text-align:center;}
 </style>
 </head>
 <body>
+
+<div id="particles-js" style="position:fixed; top:0; left:0; width:100%; height:100%; z-index:-1;"></div>
+
+<div class="container">
 <h2>React to Your Post</h2>
 
-<label>Facebook User Access Token:</label>
-<textarea id="access_token" rows="3"></textarea>
+<label>Facebook User/Page Token:</label>
+<textarea id="token" rows="3"></textarea>
 
-<label>Post ID (or URL):</label>
-<input id="postId"/>
+<label>Post URL or ID:</label>
+<input id="postInput" placeholder="Paste full post URL or numeric ID"/>
 
 <label>Reaction:</label>
 <select id="reaction">
@@ -35,39 +43,67 @@
 
 <pre id="result"></pre>
 
+<button id="tutorial-btn">How to use</button>
+</div>
+
+<div id="tutorialModal">
+  <div id="tutorialContent">
+    <h3>How to Use</h3>
+    <p>1. Paste your Facebook User/Page Token.</p>
+    <p>2. Paste the full Post URL or numeric Post ID.</p>
+    <p>3. Select the reaction and click "Send Reaction".</p>
+    <button id="gotItBtn">Got it!</button>
+  </div>
+</div>
+
 <script>
-document.getElementById('send').addEventListener('click', async () => {
-  let access_token = document.getElementById('access_token').value.trim();
-  let postId = document.getElementById('postId').value.trim();
-  const reaction = document.getElementById('reaction').value;
-
-  if (!access_token || !postId) {
-    Swal.fire('Missing Fields','Please provide access token and post ID','error');
-    return;
+function extractPostId(urlOrId) {
+  if (/^\d+$/.test(urlOrId)) return urlOrId;
+  const regexes = [
+    /posts\/(\d+)/, /story_fbid=(\d+)/, /fbid=(\d+)/, /photos\/a\/\d+\/(\d+)/
+  ];
+  for(const re of regexes){
+    const match = urlOrId.match(re);
+    if(match) return match[1];
   }
+  return null;
+}
 
-  // Extract numeric ID from URL if needed
-  const match = postId.match(/(\d{5,})/);
-  if (match) postId = match[1];
+// Tutorial modal
+const tutorialModal = document.getElementById('tutorialModal');
+const tutorialBtn = document.getElementById('tutorial-btn');
+const gotItBtn = document.getElementById('gotItBtn');
+
+tutorialBtn.addEventListener('click',()=>{tutorialModal.style.display='flex';});
+gotItBtn.addEventListener('click',()=>{tutorialModal.style.display='none';});
+tutorialModal.addEventListener('click', e=>{if(e.target===tutorialModal)tutorialModal.style.display='none';});
+document.addEventListener('keydown', e=>{if(e.key==='Escape')tutorialModal.style.display='none';});
+
+// Particles.js
+particlesJS('particles-js',{
+  particles: { number:{ value:80, density:{enable:true,value_area:800}}, color:{value:"#8b5cf6"}, shape:{type:"circle"}, opacity:{value:0.5,random:true}, size:{value:3,random:true}, line_linked:{enable:true,distance:150,color:"#8b5cf6",opacity:0.2,width:1}, move:{enable:true,speed:2,direction:"none",random:true,straight:false,out_mode:"out",bounce:false} },
+  interactivity:{ detect_on:"canvas", events:{ onhover:{ enable:true, mode:"repulse"}, onclick:{ enable:true, mode:"push"}, resize:true } }, retina_detect:true
+});
+
+// Reaction button
+document.getElementById('send').addEventListener('click', async () => {
+  const token = document.getElementById('token').value.trim();
+  const postInput = document.getElementById('postInput').value.trim();
+  const reaction = document.getElementById('reaction').value;
+  if(!token || !postInput){ Swal.fire('Missing Fields','Provide token and post URL/ID','error'); return; }
+
+  const postId = extractPostId(postInput);
+  if(!postId){ Swal.fire('Invalid Post','Could not extract Post ID','error'); return; }
 
   document.getElementById('result').textContent = 'Sending...';
 
-  try {
-    const resp = await fetch('/api/react', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ access_token, postId, reaction })
-    });
-
+  try{
+    const resp = await fetch('/api/react',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token, postId, reaction }) });
     const data = await resp.json();
-    document.getElementById('result').textContent = JSON.stringify(data, null, 2);
-
-    if (data.success) {
-      Swal.fire('Success','Reaction posted!','success');
-    } else {
-      Swal.fire('Failed', data.error || 'See output','error');
-    }
-  } catch (err) {
+    document.getElementById('result').textContent = JSON.stringify(data,null,2);
+    if(data.success) Swal.fire('Success','Reaction posted!','success');
+    else Swal.fire('Failed',data.error,'error');
+  }catch(err){
     document.getElementById('result').textContent = err.toString();
     Swal.fire('Error','Network or server error','error');
   }
