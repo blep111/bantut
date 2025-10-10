@@ -13,19 +13,19 @@ let lastPostId = null;
 
 // React to a post
 async function reactPost(token, postId, reaction) {
-  const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(postId)}/reactions?type=${reaction}&access_token=${token}`;
+  const url = `https://graph.facebook.com/v18.0/${postId}/reactions?type=${reaction}&access_token=${token}`;
   const resp = await fetch(url, { method: 'POST' });
   return resp.json();
 }
 
 // Comment on a post
 async function commentPost(token, postId, message) {
-  const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(postId)}/comments`;
-  const resp = await fetch(`${url}?message=${encodeURIComponent(message)}&access_token=${token}`, { method: 'POST' });
+  const url = `https://graph.facebook.com/v18.0/${postId}/comments?message=${encodeURIComponent(message)}&access_token=${token}`;
+  const resp = await fetch(url, { method: 'POST' });
   return resp.json();
 }
 
-// Get latest post from a target ID
+// Get latest post from target
 async function getLatestPost(targetId, token) {
   const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(targetId)}/posts?fields=id,created_time&limit=1&access_token=${token}`;
   const resp = await fetch(url);
@@ -36,11 +36,13 @@ async function getLatestPost(targetId, token) {
 
 // Start watching target
 app.post('/api/start-watch', async (req, res) => {
-  const { token, targetId, reactions } = req.body;
+  const { token, targetId, reactions, interval } = req.body;
 
   if (!token || !targetId || !reactions || !Array.isArray(reactions)) {
     return res.status(400).json({ success: false, error: 'Missing or invalid fields' });
   }
+
+  const pollInterval = interval && !isNaN(interval) ? parseInt(interval) : 10000; // default 10s
 
   lastPostId = await getLatestPost(targetId, token);
 
@@ -52,23 +54,23 @@ app.post('/api/start-watch', async (req, res) => {
         lastPostId = latestPost;
         console.log(`New post detected: ${latestPost}`);
 
-        // React immediately
+        // React on post
         for (let i = 0; i < reactions.length; i++) {
           const reaction = reactions[i % reactions.length];
           const result = await reactPost(token, latestPost, reaction);
           console.log(`Reacted ${reaction} on ${latestPost}`, result);
         }
 
-        // Comment "hi master"
+        // Comment on post
         const commentResult = await commentPost(token, latestPost, 'hi master');
         console.log('Commented "hi master":', commentResult);
       }
     } catch (err) {
-      console.error('Error in watch bot:', err.message);
+      console.error('Error in bot:', err.message);
     }
-  }, 5000);
+  }, pollInterval);
 
-  res.json({ success: true, message: 'Bot activated. It will react and comment on the target’s posts.' });
+  res.json({ success: true, message: `Bot activated. Polling every ${pollInterval / 1000} seconds.` });
 });
 
 app.get('*', (req,res) => { res.sendFile(path.join(__dirname,'public','index.html')); });
