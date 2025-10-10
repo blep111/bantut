@@ -1,34 +1,113 @@
 // server.js
-const express = require("express");
-const fetch = require("node-fetch");
-const cors = require("cors");
-const bodyParser = require("body-parser");
-const path = require("path");
+const express = require('express');
+const fetch = require('node-fetch');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, 'public')));
 
 /**
- * activeBots structure:
- * {
- *   targetId: {
- *     intervalId,
- *     processedPosts: Set(),
- *     activatedAt: timestampMs,
- *     tokens: [ ... ], // current tokens (may be refreshed)
- *     meta: { reactions, comment, appId, appSecret }
- *   }
- * }
+ * CONFIG
+ * Provide TOKEN_ENCRYPTION_KEY as 32-byte base64 string in env for best security.
+ * If not present, server will create a secret.key file on first run (less secure).
  */
-const activeBots = {};
+const TOKENS_FILE = path.join(__dirname, 'tokens.json');
+const SECRET_FILE = path.join(__dirname, 'secret.key');
 
-// --- Helpers ---
+function getEncryptionKey() {
+  const envKey = process.env.TOKEN_ENCRYPTION_KEY;
+  if (envKey && envKey.length > 0) {
+    // expect base64 string
+    return Buffer.from(envKey, 'base64');
+  }
+  // fallback: create/read secret.key (32 bytes base64)
+  if (fs.existsSync(SECRET_FILE)) {
+    const b64 = fs.readFileSync(SECRET_FILE, 'utf8').trim();
+    return Buffer.from(b64, 'base64');
+  } else {
+    const key = crypto.randomBytes(32);
+    fs.writeFileSync(SECRET_FILE, key.toString('base64'), { mode: 0o600 });
+    console.warn('No TOKEN_ENCRYPTION_KEY in env — generated secret.key (store it safely).');
+    return key;
+  }
+}
+const ENC_KEY = getEncryptionKey();
+if (!ENC_KEY || ENC_KEY.length !== 32) {
+  console.error('Encryption key must be 32 bytes. Set TOKEN_ENCRYPTION_KEY env var as base64(32bytes).');
+  process.exit(1);
+}
+
+// encryption helpers (AES-256-GCM)
+function encrypt(text) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]).toString('base64'); // store as base64
+}
+
+function decrypt(b64) {
+  try {
+    const data = Buffer.from(b64, 'base64');
+    const iv = data.slice(0, 12);
+    const tag = data.slice(12, 28);
+    const encrypted = data.slice(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, iv);
+    decipher.setAuthTag(tag);
+    const out = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return out.toString('utf8');
+  } catch (err) {
+    console.error('Decrypt error', err.message);
+    return null;
+  }
+}
+
+// tokens persistence
+function loadTokens() {
+  try {
+    if (!fs.existsSync(TOKENS_FILE)) return [];
+    const raw = fs.readFileSync(TOKENS_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Failed loading tokens.json', err.message);
+    return [];
+  }
+}
+
+function saveTokens(arr) {
+  fs.writeFileSync(TOKENS_FILE, JSON.stringify(arr, null, 2), { mode: 0o600 });
+}
+
+// ensure file exists
+if (!fs.existsSync(TOKENS_FILE)) saveTokens([]);
+
+// helpers for token store
+function maskTok(token) {
+  if (!token) return '';
+  return token.slice(0, 6) + '...' + token.slice(-6);
+}
+
+// load into memory
+let storedTokens = loadTokens(); // array of { id, name, tokenEnc, createdAt }
+
+// utility to generate id
+function genId() {
+  return crypto.randomBytes(8).toString('hex');
+}
+
+/* ====================================================================
+   Facebook actions (same as previous bot)
+   ==================================================================== */
 async function reactPost(token, postId, reaction) {
   try {
     const url = `https://graph.facebook.com/v18.0/${postId}/reactions?type=${reaction}&access_token=${token}`;
-    const r = await fetch(url, { method: "POST" });
+    const r = await fetch(url, { method: 'POST' });
     return await r.json();
   } catch (err) {
     return { error: err.message };
@@ -40,7 +119,7 @@ async function commentPost(token, postId, message) {
     const url = `https://graph.facebook.com/v18.0/${postId}/comments?message=${encodeURIComponent(
       message
     )}&access_token=${token}`;
-    const r = await fetch(url, { method: "POST" });
+    const r = await fetch(url, { method: 'POST' });
     return await r.json();
   } catch (err) {
     return { error: err.message };
@@ -50,225 +129,209 @@ async function commentPost(token, postId, message) {
 async function sharePost(token, postId) {
   try {
     const url = `https://graph.facebook.com/v18.0/me/feed?link=https://www.facebook.com/${postId}&access_token=${token}`;
-    const r = await fetch(url, { method: "POST" });
+    const r = await fetch(url, { method: 'POST' });
     return await r.json();
   } catch (err) {
     return { error: err.message };
   }
 }
 
-// Get latest posts (with created_time)
 async function getLatestPosts(targetId, token) {
   try {
-    const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(
-      targetId
-    )}/posts?fields=id,created_time&limit=10&access_token=${token}`;
+    const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(targetId)}/posts?fields=id,created_time&limit=10&access_token=${token}`;
     const r = await fetch(url);
-    const data = await r.json();
-    if (data && Array.isArray(data.data)) return data.data; // items with id and created_time
-    return [];
+    return (await r.json()).data || [];
   } catch (err) {
-    console.error("getLatestPosts error:", err.message);
+    console.error('getLatestPosts error', err.message);
     return [];
   }
 }
 
-/**
- * Exchange short-lived token for long-lived token (if appId/appSecret available)
- * Returns new token string or null on failure.
- */
-async function exchangeForLongLivedToken(shortToken, appId, appSecret) {
-  if (!appId || !appSecret || !shortToken) return null;
-  try {
-    const url = `https://graph.facebook.com/v18.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(
-      appId
-    )}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(shortToken)}`;
-    const r = await fetch(url);
-    const data = await r.json();
-    if (data && data.access_token) return data.access_token;
-    console.warn("exchangeForLongLivedToken failed:", data);
-    return null;
-  } catch (err) {
-    console.error("exchangeForLongLivedToken error:", err.message);
-    return null;
-  }
-}
+/* ====================================================================
+   Active bots management (uses tokens from store or direct tokens)
+   activeBots[targetId] = { intervalId, processedPosts:Set, activatedAt, accounts: [{id, token}], meta:{reactions,comment} }
+   ==================================================================== */
+const activeBots = {};
 
-/**
- * Validate a token using /debug_token (requires an app access token)
- * Returns true if valid (not expired) else false.
- */
-async function validateToken(tokenToCheck, appId, appSecret) {
-  if (!appId || !appSecret) return true; // cannot validate; assume user-provided token
-  try {
-    const appAccess = `${appId}|${appSecret}`;
-    const url = `https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(
-      tokenToCheck
-    )}&access_token=${encodeURIComponent(appAccess)}`;
-    const r = await fetch(url);
-    const data = await r.json();
-    if (data && data.data && data.data.is_valid) return true;
-    return false;
-  } catch (err) {
-    console.error("validateToken error:", err.message);
-    return false;
-  }
-}
-
-// --- Polling logic per target ---
 async function pollForTarget(targetId) {
   const bot = activeBots[targetId];
   if (!bot) return;
+  const { accounts, processedPosts, activatedAt, meta } = bot;
+  if (!accounts || accounts.length === 0) return;
 
-  const { tokens, meta, processedPosts, activatedAt } = bot;
-  // Use first token to list posts (we assume tokens have similar visibility)
-  const listToken = tokens[0];
-
+  // use first account to list posts (visibility assumption)
+  const listToken = accounts[0].token;
   const posts = await getLatestPosts(targetId, listToken);
-  if (!posts || posts.length === 0) return;
 
   for (const p of posts) {
     const postId = p.id;
     const createdTime = p.created_time ? Date.parse(p.created_time) : null;
 
-    // Only react if created_time exists and is after activation, otherwise skip
-    if (createdTime && createdTime <= activatedAt) {
-      // skip older posts
-      continue;
-    }
+    if (createdTime && createdTime <= activatedAt) continue; // ignore old posts
+    if (processedPosts.has(postId)) continue;
 
-    if (processedPosts.has(postId)) continue; // already processed
-
-    // mark processed
     processedPosts.add(postId);
+    console.log(`New post detected for ${targetId}: ${postId}`);
 
-    console.log(`New post (after activation) detected: ${postId} for target ${targetId}`);
+    for (let i = 0; i < accounts.length; i++) {
+      const acc = accounts[i];
+      const token = acc.token; // raw token string
+      const reaction = meta.reactions[Math.floor(Math.random() * meta.reactions.length)];
 
-    // For each token, attempt actions
-    for (let idx = 0; idx < tokens.length; idx++) {
-      let token = tokens[idx];
+      const r1 = await reactPost(token, postId, reaction);
+      console.log(`Account ${acc.id} reacted:`, r1);
 
-      // Try to validate token; if invalid and app credentials provided, attempt exchange once
-      const ok = await validateToken(token, meta.appId, meta.appSecret);
-      if (!ok && meta.appId && meta.appSecret) {
-        console.log("Token invalid/expired — attempting exchange for long-lived token using app credentials");
-        const exchanged = await exchangeForLongLivedToken(token, meta.appId, meta.appSecret);
-        if (exchanged) {
-          tokens[idx] = exchanged;
-          token = exchanged;
-          console.log("Token exchanged successfully for account index", idx);
-        } else {
-          console.warn("Token exchange failed for account index", idx);
-        }
-      }
+      const c1 = await commentPost(token, postId, meta.comment || 'hi master');
+      console.log(`Account ${acc.id} commented:`, c1);
 
-      // React with random reaction from list (you can change to deterministic)
-      try {
-        const reaction = meta.reactions[Math.floor(Math.random() * meta.reactions.length)];
-        const r1 = await reactPost(token, postId, reaction);
-        console.log(`React result for token[${idx}]:`, r1);
-      } catch (err) {
-        console.error("React error", err.message);
-      }
-
-      // Comment
-      try {
-        const c = await commentPost(token, postId, meta.comment || "hi master");
-        console.log(`Comment result for token[${idx}]:`, c);
-      } catch (err) {
-        console.error("Comment error", err.message);
-      }
-
-      // Share
-      try {
-        const s = await sharePost(token, postId);
-        console.log(`Share result for token[${idx}]:`, s);
-      } catch (err) {
-        console.error("Share error", err.message);
-      }
-    } // end tokens loop
-  } // end posts loop
+      const s1 = await sharePost(token, postId);
+      console.log(`Account ${acc.id} shared:`, s1);
+    }
+  }
 }
 
-// --- API endpoints ---
+/* ====================================================================
+   REST API: token management, start/stop bots, status
+   ==================================================================== */
 
-/**
- * Start multi-bot for a target.
- * Body: { tokens: [..], targetId, reactions: [..], comment, appId (optional), appSecret (optional) }
- * The bot will only act on posts whose created_time is AFTER activation time.
- */
-app.post("/api/start-bot", async (req, res) => {
+// Add a token to local store (encrypted)
+// Body: { token: string, name?: string }
+app.post('/api/add-token', (req, res) => {
   try {
-    const { tokens, targetId, reactions, comment, appId, appSecret } = req.body;
-    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
-      return res.status(400).json({ success: false, error: "tokens (array) required" });
-    }
-    if (!targetId) return res.status(400).json({ success: false, error: "targetId required" });
-    if (!reactions || !Array.isArray(reactions) || reactions.length === 0) {
-      return res.status(400).json({ success: false, error: "reactions (array) required" });
-    }
-    if (activeBots[targetId]) {
-      return res.json({ success: false, message: "Bot already running for this targetId" });
-    }
+    const { token, name } = req.body;
+    if (!token || token.length < 10) return res.status(400).json({ success: false, error: 'token required' });
 
-    // activatedAt ensures we only react to posts after activation
-    const activatedAt = Date.now();
-
-    // create bot entry
-    activeBots[targetId] = {
-      intervalId: null,
-      processedPosts: new Set(),
-      activatedAt,
-      tokens: tokens.slice(), // copy (may be refreshed)
-      meta: { reactions, comment, appId, appSecret },
+    const id = genId();
+    const entry = {
+      id,
+      name: name || `acc-${id}`,
+      tokenEnc: encrypt(token),
+      createdAt: new Date().toISOString(),
     };
-
-    // Immediately poll once, then set interval (10s)
-    await pollForTarget(targetId);
-    activeBots[targetId].intervalId = setInterval(() => pollForTarget(targetId), 10000);
-
-    return res.json({
-      success: true,
-      message: `Bot started for ${targetId}. Only new posts after activation (${new Date(activatedAt).toISOString()}) will be processed.`,
-    });
+    storedTokens.push(entry);
+    saveTokens(storedTokens);
+    return res.json({ success: true, id, name: entry.name });
   } catch (err) {
-    console.error("start-bot error:", err.message);
+    console.error('add-token error', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/**
- * Stop bot
- * Body: { targetId }
- */
-app.post("/api/stop-bot", (req, res) => {
-  const { targetId } = req.body;
-  if (!targetId) return res.status(400).json({ success: false, error: "targetId required" });
-  const bot = activeBots[targetId];
-  if (!bot) return res.json({ success: false, message: "No active bot for this targetId" });
-  clearInterval(bot.intervalId);
-  delete activeBots[targetId];
-  return res.json({ success: true, message: `Bot stopped for ${targetId}` });
+// List stored tokens (masked)
+app.get('/api/tokens', (req, res) => {
+  try {
+    const result = storedTokens.map((t) => ({
+      id: t.id,
+      name: t.name,
+      createdAt: t.createdAt,
+      tokenMask: '*****' + t.id.slice(0, 4),
+    }));
+    return res.json({ success: true, tokens: result });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-/**
- * Status endpoint to list active bots
- */
-app.get("/api/status", (req, res) => {
+// Remove token by id
+app.delete('/api/tokens/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    const idx = storedTokens.findIndex((t) => t.id === id);
+    if (idx === -1) return res.status(404).json({ success: false, error: 'not found' });
+    storedTokens.splice(idx, 1);
+    saveTokens(storedTokens);
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Start multi-bot for a target using stored tokens (selectedIds) or direct tokens
+// Body: { tokenIds?: [id,...], targetId, reactions: [...], comment }
+// If tokenIds provided, will use stored tokens by id. Otherwise tokens param (raw) can be used.
+app.post('/api/start-bot', async (req, res) => {
+  try {
+    const { tokenIds, tokens, targetId, reactions, comment } = req.body;
+    if (!targetId) return res.status(400).json({ success: false, error: 'targetId required' });
+    if (!reactions || !Array.isArray(reactions) || reactions.length === 0)
+      return res.status(400).json({ success: false, error: 'reactions array required' });
+
+    if (activeBots[targetId]) return res.json({ success: false, message: 'Bot already running for this targetId' });
+
+    // build accounts array {id, token}
+    let accounts = [];
+    if (Array.isArray(tokenIds) && tokenIds.length > 0) {
+      for (const id of tokenIds) {
+        const entry = storedTokens.find((t) => t.id === id);
+        if (!entry) continue;
+        const tok = decrypt(entry.tokenEnc);
+        if (!tok) {
+          console.warn('Failed to decrypt token for id', id);
+          continue;
+        }
+        accounts.push({ id: entry.id, name: entry.name, token: tok });
+      }
+    } else if (Array.isArray(tokens) && tokens.length > 0) {
+      // raw tokens included in request (not recommended)
+      accounts = tokens.map((t, idx) => ({ id: `tmp-${idx}`, name: `tmp-${idx}`, token: t }));
+    } else {
+      return res.status(400).json({ success: false, error: 'tokenIds or tokens required' });
+    }
+
+    if (accounts.length === 0) return res.status(400).json({ success: false, error: 'no valid accounts available' });
+
+    const bot = {
+      intervalId: null,
+      processedPosts: new Set(),
+      activatedAt: Date.now(),
+      accounts,
+      meta: { reactions, comment },
+    };
+    activeBots[targetId] = bot;
+
+    // run immediately and then interval
+    await pollForTarget(targetId);
+    bot.intervalId = setInterval(() => pollForTarget(targetId), 10000);
+
+    return res.json({ success: true, message: `Bot started for ${targetId} using ${accounts.length} accounts.` });
+  } catch (err) {
+    console.error('start-bot error', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Stop bot
+app.post('/api/stop-bot', (req, res) => {
+  try {
+    const { targetId } = req.body;
+    if (!targetId) return res.status(400).json({ success: false, error: 'targetId required' });
+    const b = activeBots[targetId];
+    if (!b) return res.json({ success: false, message: 'No active bot for this targetId' });
+    clearInterval(b.intervalId);
+    delete activeBots[targetId];
+    return res.json({ success: true, message: `Bot stopped for ${targetId}` });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// status
+app.get('/api/status', (req, res) => {
   const keys = Object.keys(activeBots);
   const status = keys.map((k) => ({
     targetId: k,
     activatedAt: new Date(activeBots[k].activatedAt).toISOString(),
-    accounts: activeBots[k].tokens.length,
+    accounts: activeBots[k].accounts.map((a) => ({ id: a.id, name: a.name })),
     reactions: activeBots[k].meta.reactions,
   }));
   res.json({ success: true, bots: status });
 });
 
-// Serve frontend
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+/* Serve frontend */
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+/* Start server */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Multi-bot server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
