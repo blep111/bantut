@@ -1,162 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<title>Safe Facebook Account Bot (Personal tokens)</title>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<style>
-  body{font-family:Inter,Arial;background:#071427;color:#dff3ff;padding:18px;}
-  .card{max-width:900px;margin:12px auto;background:#051226;padding:16px;border-radius:8px;}
-  input,textarea,button,select{width:100%;padding:8px;margin:6px 0;border-radius:6px;border:none;}
-  button.primary{background:#0ea5e9;color:#002a3a;padding:10px;border-radius:6px;cursor:pointer;}
-  button.warn{background:#ef4444;color:#fff;padding:10px;border-radius:6px;cursor:pointer;}
-  table{width:100%;border-collapse:collapse;margin-top:8px;}
-  th,td{padding:8px;border-bottom:1px solid #08324a;text-align:left;}
-  pre{background:#021426;padding:12px;border-radius:6px;overflow:auto;}
-</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Facebook Boosting Site</title>
+<link rel="stylesheet" href="main.css">
 </head>
 <body>
-  <div class="card">
-    <h2>Safe Facebook Account Bot (personal tokens only)</h2>
+<nav>
+    <h1>FB Boosting Dashboard</h1>
+    <div id="token-list"></div>
+</nav>
 
-    <h3>1. Add a token (your own account)</h3>
-    <label>Paste token</label>
-    <textarea id="newToken" placeholder="Paste full user access token"></textarea>
-    <label>Friendly name (optional)</label>
-    <input id="newName" placeholder="e.g. myAcc1"/>
-    <button id="addTokenBtn" class="primary">Add token</button>
+<main>
+    <section id="add-token">
+        <input type="text" id="new-token" placeholder="Enter Facebook token">
+        <button id="addTokenBtn">Add Token</button>
+    </section>
 
-    <h3>2. Stored accounts</h3>
-    <div id="tokensArea">Loading...</div>
+    <section id="bot-controls">
+        <input type="text" id="targetId" placeholder="Target ID">
+        <input type="text" id="commentText" placeholder="Comment text">
+        <button id="startBotBtn">Start Bot</button>
+        <button id="stopBotBtn">Stop Bot</button>
+    </section>
 
-    <h3>3. Diagnostics</h3>
-    <label>Token for testing (paste or select stored token id)</label>
-    <input id="diagToken" placeholder="paste token for quick test (or leave blank)"/>
-    <button id="testTokenBtn" class="primary">Test Token (me)</button>
+    <section id="status"></section>
+</main>
 
-    <label>Token (for checking target visibility)</label>
-    <input id="diagToken2" placeholder="paste token to check target visibility"/>
-    <label>Target ID</label>
-    <input id="diagTarget" placeholder="target id"/>
-    <button id="checkTargetBtn" class="primary">Check target (what posts token sees)</button>
-
-    <h3>4. Start live bot</h3>
-    <label>Select stored accounts to use (checkboxes above)</label>
-    <label>Target ID to monitor</label>
-    <input id="botTarget" placeholder="target id (user/page)"/>
-    <label>Reactions (comma separated)</label>
-    <input id="botReactions" value="LIKE,LOVE,HAHA"/>
-    <label>Comment text</label>
-    <input id="botComment" value="hi master"/>
-    <label>Per-account delay (ms) — lower = faster but riskier</label>
-    <input id="botDelay" value="1200"/>
-    <div style="display:flex;gap:8px;">
-      <button id="startBotBtn" class="primary">Start Bot</button>
-      <button id="stopBotBtn" class="warn">Stop Bot</button>
-      <button id="statusBtn">Status</button>
-    </div>
-
-    <h3>5. Output / logs</h3>
-    <pre id="output">Ready.</pre>
-  </div>
-
-<script>
-const output = document.getElementById('output');
-
-async function api(path, opts) {
-  const r = await fetch(path, opts);
-  return r.json();
-}
-
-async function loadTokens() {
-  const area = document.getElementById('tokensArea');
-  area.textContent = 'Loading...';
-  try {
-    const j = await api('/api/tokens');
-    if (!j.success) { area.textContent = 'Failed'; return; }
-    if (j.tokens.length === 0) { area.innerHTML = '<div>No tokens stored yet.</div>'; return; }
-    let html = '<table><thead><tr><th>Use</th><th>Name</th><th>Id</th><th>Created</th><th>Action</th></tr></thead><tbody>';
-    j.tokens.forEach(t => {
-      html += `<tr>
-        <td><input type="checkbox" class="tokCheck" data-id="${t.id}"></td>
-        <td>${escapeHtml(t.name)}</td>
-        <td>${t.id}</td>
-        <td>${t.createdAt}</td>
-        <td><button class="delBtn" data-id="${t.id}">Remove</button></td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    area.innerHTML = html;
-    document.querySelectorAll('.delBtn').forEach(b => {
-      b.onclick = async () => {
-        if (!confirm('Remove token?')) return;
-        const id = b.getAttribute('data-id');
-        await fetch('/api/tokens/' + encodeURIComponent(id), { method:'DELETE' });
-        loadTokens();
-      };
-    });
-  } catch (err) { area.textContent = err.toString(); }
-}
-function escapeHtml(s){ return s ? s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) : ''; }
-
-document.getElementById('addTokenBtn').addEventListener('click', async () => {
-  const token = document.getElementById('newToken').value.trim();
-  const name = document.getElementById('newName').value.trim();
-  if (!token) return Swal.fire('Error','Token required','error');
-  const j = await api('/api/add-token', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, name })});
-  if (j.success) {
-    Swal.fire('Saved','Token stored locally (encrypted)','success');
-    document.getElementById('newToken').value = '';
-    document.getElementById('newName').value = '';
-    loadTokens();
-  } else Swal.fire('Error', j.error || 'Failed', 'error');
-});
-
-document.getElementById('testTokenBtn').addEventListener('click', async () => {
-  const token = document.getElementById('diagToken').value.trim();
-  if (!token) return Swal.fire('Token required','Paste token into field','error');
-  output.textContent = 'Testing token...';
-  const j = await api('/api/test-token', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token })});
-  output.textContent = JSON.stringify(j, null, 2);
-});
-
-document.getElementById('checkTargetBtn').addEventListener('click', async () => {
-  const token = document.getElementById('diagToken2').value.trim();
-  const target = document.getElementById('diagTarget').value.trim();
-  if (!token || !target) return Swal.fire('Error','Token and target required','error');
-  output.textContent = 'Checking target...';
-  const j = await api('/api/check-target', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, targetId: target })});
-  output.textContent = JSON.stringify(j, null, 2);
-});
-
-document.getElementById('startBotBtn').addEventListener('click', async () => {
-  const checked = Array.from(document.querySelectorAll('.tokCheck:checked')).map(cb => cb.getAttribute('data-id'));
-  if (checked.length === 0) return Swal.fire('Select accounts','Select stored accounts to use','error');
-  const target = document.getElementById('botTarget').value.trim();
-  const reactions = document.getElementById('botReactions').value.split(',').map(s=>s.trim()).filter(Boolean);
-  const comment = document.getElementById('botComment').value.trim();
-  const perAccountDelayMs = parseInt(document.getElementById('botDelay').value) || 1200;
-  if (!target || reactions.length === 0) return Swal.fire('Error','Target and reactions required','error');
-  output.textContent = 'Starting bot...';
-  const j = await api('/api/start-bot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tokenIds: checked, targetId: target, reactions, comment, perAccountDelayMs })});
-  output.textContent = JSON.stringify(j, null, 2);
-  if (j.success) Swal.fire('Started', j.message, 'success');
-});
-
-document.getElementById('stopBotBtn').addEventListener('click', async () => {
-  const target = document.getElementById('botTarget').value.trim();
-  if (!target) return Swal.fire('Error','Enter target id','error');
-  const j = await api('/api/stop-bot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ targetId: target })});
-  output.textContent = JSON.stringify(j, null, 2);
-  Swal.fire('Stopped', j.message, 'info');
-});
-
-document.getElementById('statusBtn').addEventListener('click', async () => {
-  const j = await api('/api/status');
-  output.textContent = JSON.stringify(j, null, 2);
-});
-
-loadTokens();
-</script>
+<script src="main.js"></script>
 </body>
 </html>
