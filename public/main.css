@@ -1,0 +1,9 @@
+body { margin:0; font-family: Arial; background: #1e1b2e; color: #fff; }
+nav { display:flex; justify-content:space-between; align-items:center; padding:1rem; background:#111; }
+#token-list div { margin: 0.2rem 0; color: #8b5cf6; }
+main { padding: 2rem; }
+input { padding: 0.5rem; margin-right: 0.5rem; border-radius:5px; border:none; }
+button { padding: 0.5rem 1rem; border:none; border-radius:5px; background:#8b5cf6; color:white; cursor:pointer; margin-top:0.5rem; }
+button:hover { background:#7c3aed; }
+section { margin-bottom: 2rem; }
+#status { margin-top: 1rem; font-weight:bold; color: #10b981; }
