@@ -25,7 +25,7 @@ async function commentPost(token, postId, message) {
   return resp.json();
 }
 
-// Get latest post
+// Get latest post from a target ID
 async function getLatestPost(targetId, token) {
   const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(targetId)}/posts?fields=id,created_time&limit=1&access_token=${token}`;
   const resp = await fetch(url);
@@ -34,7 +34,7 @@ async function getLatestPost(targetId, token) {
   return null;
 }
 
-// Start auto-watch
+// Start watching target
 app.post('/api/start-watch', async (req, res) => {
   const { token, targetId, reactions } = req.body;
 
@@ -44,7 +44,6 @@ app.post('/api/start-watch', async (req, res) => {
 
   lastPostId = await getLatestPost(targetId, token);
 
-  // Polling every 5 seconds for immediate reaction
   setInterval(async () => {
     try {
       const latestPost = await getLatestPost(targetId, token);
@@ -67,9 +66,9 @@ app.post('/api/start-watch', async (req, res) => {
     } catch (err) {
       console.error('Error in watch bot:', err.message);
     }
-  }, 5000); // checks every 5 seconds
+  }, 5000);
 
-  res.json({ success: true, message: 'Bot activated. It will auto-react and comment on new posts.' });
+  res.json({ success: true, message: 'Bot activated. It will react and comment on the target’s posts.' });
 });
 
 app.get('*', (req,res) => { res.sendFile(path.join(__dirname,'public','index.html')); });
