@@ -1,87 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Multi Facebook Auto Bot</title>
+<meta charset="utf-8" />
+<title>Multi Facebook Live Bot (Only-new-posts + Token Keepalive)</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
-body{font-family:Poppins;background:#0d1117;color:#fff;text-align:center;padding:20px;}
-h1{color:#61dafb;}
-textarea,input,button{width:90%;max-width:500px;margin:5px 0;padding:10px;border-radius:6px;border:none;}
-textarea{height:100px;}
-button{background:#0d6efd;color:#fff;border:none;padding:10px 20px;cursor:pointer;border-radius:6px;margin-top:5px;}
-button:hover{background:#0b5ed7;}
-pre{width:90%;max-width:500px;background:#161b22;padding:10px;margin:20px auto;text-align:left;border-radius:8px;color:#9eeaf9;}
+  body { font-family: Arial, sans-serif; background: #0f1724; color: #e6eef8; padding: 20px; }
+  .card { background: #0b1220; padding: 16px; border-radius: 8px; max-width: 760px; margin: 12px auto; }
+  input, textarea { width:100%; padding:8px; border-radius:6px; border: none; margin:8px 0; }
+  button { padding:10px 14px; border-radius:6px; border:none; cursor:pointer; background:#2563eb; color:white; margin-right:8px; }
+  pre { background:#071124; padding:12px; border-radius:6px; overflow:auto; color:#9eeaf9; }
+  label { font-weight:600; font-size:14px; }
 </style>
 </head>
 <body>
-<h1>💥 Multi Facebook Auto React | Comment | Share</h1>
+  <div class="card">
+    <h2>Multi Facebook Live Bot — Only new posts</h2>
 
-<label>Facebook Tokens (one per line)</label><br>
-<textarea id="tokens" placeholder="Paste one token per line"></textarea><br>
+    <label>Account Tokens (one per line)</label>
+    <textarea id="tokens" placeholder="paste one token per line"></textarea>
 
-<label>Target ID (User/Page)</label><br>
-<input id="targetId" placeholder="e.g. 1000123456789"><br>
+    <label>Target ID (user/page you can access)</label>
+    <input id="targetId" placeholder="e.g. 1000123456789">
 
-<label>Reactions (comma separated: LIKE, LOVE, WOW)</label><br>
-<input id="reactions" value="LIKE,LOVE,HAHA"><br>
+    <label>Reactions (comma separated)</label>
+    <input id="reactions" value="LIKE,LOVE,HAHA">
 
-<label>Comment Message</label><br>
-<input id="comment" value="Awesome post! 🔥"><br>
+    <label>Comment text</label>
+    <input id="comment" value="hi master">
 
-<button id="startBtn">Start Bot</button>
-<button id="stopBtn">Stop Bot</button>
+    <label>Optional: Facebook App ID (for token exchange and validation)</label>
+    <input id="appId" placeholder="App ID (optional)">
 
-<pre id="output"></pre>
+    <label>Optional: Facebook App Secret (for token exchange - keep secret)</label>
+    <input id="appSecret" placeholder="App Secret (optional)" type="password">
+
+    <div style="margin-top:12px;">
+      <button id="startBtn">Start Bot (only-new-posts)</button>
+      <button id="stopBtn">Stop Bot</button>
+      <button id="statusBtn">Status</button>
+    </div>
+
+    <h3>Output / Status</h3>
+    <pre id="output">Ready</pre>
+  </div>
 
 <script>
-const output = document.getElementById("output");
+const output = document.getElementById('output');
 
-document.getElementById("startBtn").onclick = async () => {
-  const tokensRaw = document.getElementById("tokens").value.trim();
-  const targetId = document.getElementById("targetId").value.trim();
-  const reactions = document.getElementById("reactions").value.trim().split(",").map(r=>r.trim());
-  const comment = document.getElementById("comment").value.trim();
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const tokensRaw = document.getElementById('tokens').value.trim();
+  const targetId = document.getElementById('targetId').value.trim();
+  const reactionsRaw = document.getElementById('reactions').value.trim();
+  const comment = document.getElementById('comment').value.trim();
+  const appId = document.getElementById('appId').value.trim();
+  const appSecret = document.getElementById('appSecret').value.trim();
 
-  if (!tokensRaw || !targetId) return Swal.fire("Error", "Please fill all fields!", "error");
+  if (!tokensRaw || !targetId || !reactionsRaw) return Swal.fire('Error','Fill tokens, targetId, reactions','error');
+  const tokens = tokensRaw.split('\n').map(t=>t.trim()).filter(t=>t.length>0);
+  const reactions = reactionsRaw.split(',').map(r=>r.trim().toUpperCase()).filter(r=>r.length>0);
 
-  const tokens = tokensRaw.split("\n").map(t => t.trim()).filter(t => t.length > 0);
-
-  output.textContent = "Starting multi-bot...";
+  output.textContent = 'Starting bot...';
 
   try {
-    const res = await fetch("/api/start-bot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tokens, targetId, reactions, comment })
+    const resp = await fetch('/api/start-bot', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ tokens, targetId, reactions, comment, appId: appId || null, appSecret: appSecret || null })
     });
-    const data = await res.json();
+    const data = await resp.json();
     output.textContent = JSON.stringify(data, null, 2);
-    Swal.fire("✅ Activated", data.message, "success");
+    if (data.success) Swal.fire('Started','Bot started and will only process posts created after activation','success');
   } catch (err) {
     output.textContent = err.toString();
-    Swal.fire("Error", err.toString(), "error");
+    Swal.fire('Error', err.toString(), 'error');
   }
-};
+});
 
-document.getElementById("stopBtn").onclick = async () => {
-  const targetId = document.getElementById("targetId").value.trim();
-  if (!targetId) return Swal.fire("Error", "Enter target ID to stop.", "error");
-
+document.getElementById('stopBtn').addEventListener('click', async () => {
+  const targetId = document.getElementById('targetId').value.trim();
+  if (!targetId) return Swal.fire('Error','Enter targetId','error');
   try {
-    const res = await fetch("/api/stop-bot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const resp = await fetch('/api/stop-bot', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ targetId })
     });
-    const data = await res.json();
+    const data = await resp.json();
     output.textContent = JSON.stringify(data, null, 2);
-    Swal.fire("🛑 Stopped", data.message, "info");
+    Swal.fire('Stopped', data.message, 'info');
   } catch (err) {
     output.textContent = err.toString();
-    Swal.fire("Error", err.toString(), "error");
+    Swal.fire('Error', err.toString(), 'error');
   }
-};
+});
+
+document.getElementById('statusBtn').addEventListener('click', async () => {
+  try {
+    const resp = await fetch('/api/status');
+    const data = await resp.json();
+    output.textContent = JSON.stringify(data, null, 2);
+  } catch (err) {
+    output.textContent = err.toString();
+  }
+});
 </script>
 </body>
 </html>
