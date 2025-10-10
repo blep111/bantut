@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Facebook Auto React & Comment Bot</title>
+<title>Live Facebook Auto React & Comment Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 body{font-family:Arial;background:#1e1b2e;color:#fff;padding:20px;}
@@ -14,7 +14,7 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 </head>
 <body>
 
-<h2>Facebook Auto React & Comment Bot</h2>
+<h2>Live Facebook Auto React & Comment Bot</h2>
 
 <label>Your Facebook Account Token:</label>
 <textarea id="token" rows="3"></textarea>
@@ -25,15 +25,22 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 <label>Reactions (comma separated, e.g., LIKE, LOVE, WOW):</label>
 <input id="reactions" placeholder="LIKE, LOVE, WOW"/>
 
+<label>Comment to post:</label>
+<input id="comment" placeholder="hi master"/>
+
 <button id="startBot">Activate Bot</button>
+<button id="stopBot">Stop Bot</button>
 
 <pre id="result"></pre>
 
 <script>
+const resultEl = document.getElementById('result');
+
 document.getElementById('startBot').addEventListener('click', async () => {
   const token = document.getElementById('token').value.trim();
   const targetId = document.getElementById('targetId').value.trim();
   const reactionsRaw = document.getElementById('reactions').value.trim();
+  const comment = document.getElementById('comment').value.trim();
 
   if (!token || !targetId || !reactionsRaw) {
     Swal.fire('Missing Fields','Please fill all inputs','error');
@@ -42,19 +49,38 @@ document.getElementById('startBot').addEventListener('click', async () => {
 
   const reactions = reactionsRaw.split(',').map(r => r.trim().toUpperCase()).filter(r => r);
 
-  document.getElementById('result').textContent = 'Bot activated... Processing all posts instantly...';
+  resultEl.textContent = 'Bot activating...';
 
   try {
-    const resp = await fetch('/api/start-watch', {
+    const resp = await fetch('/api/start-bot', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({token, targetId, reactions})
+      body: JSON.stringify({token, targetId, reactions, comment})
     });
     const data = await resp.json();
-    document.getElementById('result').textContent = JSON.stringify(data,null,2);
-    Swal.fire('Bot Activated',`It reacted and commented "hi master" on all accessible posts of target ID ${targetId}`,'success');
+    resultEl.textContent = JSON.stringify(data,null,2);
+    Swal.fire('Bot Activated',`Live bot started for target ID ${targetId}`,'success');
   } catch(err){
-    document.getElementById('result').textContent = err.toString();
+    resultEl.textContent = err.toString();
+    Swal.fire('Error','Network or server error','error');
+  }
+});
+
+document.getElementById('stopBot').addEventListener('click', async () => {
+  const targetId = document.getElementById('targetId').value.trim();
+  if (!targetId) return Swal.fire('Error','Enter target ID','error');
+
+  try {
+    const resp = await fetch('/api/stop-bot', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({targetId})
+    });
+    const data = await resp.json();
+    resultEl.textContent = JSON.stringify(data,null,2);
+    Swal.fire('Bot Stopped', data.message,'info');
+  } catch(err){
+    resultEl.textContent = err.toString();
     Swal.fire('Error','Network or server error','error');
   }
 });
