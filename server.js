@@ -9,19 +9,13 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-let lastPostId = null;
+// Store last post ID per target
+const lastPostMap = {};
 
 // React to a post
 async function reactPost(token, postId, reaction) {
   const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(postId)}/reactions?type=${reaction}&access_token=${token}`;
   const resp = await fetch(url, { method: 'POST' });
-  return resp.json();
-}
-
-// Remove reaction (optional)
-async function removeReaction(token, postId) {
-  const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(postId)}/reactions?access_token=${token}`;
-  const resp = await fetch(url, { method: 'DELETE' });
   return resp.json();
 }
 
@@ -42,21 +36,26 @@ app.post('/api/start-watch', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Missing or invalid fields' });
   }
 
-  lastPostId = await getLatestPost(targetId, token);
+  // Initialize last post ID
+  if (!lastPostMap[targetId]) {
+    lastPostMap[targetId] = await getLatestPost(targetId, token);
+  }
 
-  const watchInterval = setInterval(async () => {
+  // Watch interval
+  setInterval(async () => {
     try {
       const latestPost = await getLatestPost(targetId, token);
 
-      if (latestPost && latestPost !== lastPostId) {
-        lastPostId = latestPost;
+      if (latestPost && latestPost !== lastPostMap[targetId]) {
+        lastPostMap[targetId] = latestPost;
         console.log(`New post detected: ${latestPost}`);
 
         // React automatically
         for (let i = 0; i < reactions.length; i++) {
           const reaction = reactions[i % reactions.length];
-          await reactPost(token, latestPost, reaction);
-          console.log(`Reacted ${reaction} on ${latestPost}`);
+          const result = await reactPost(token, latestPost, reaction);
+          if (result.error) console.error('Reaction failed:', result.error.message);
+          else console.log(`Reacted ${reaction} on ${latestPost}`);
           await new Promise(r => setTimeout(r, delay));
         }
       }
@@ -65,7 +64,7 @@ app.post('/api/start-watch', async (req, res) => {
     }
   }, interval);
 
-  res.json({ success: true, message: 'Bot started. Watching for new posts...' });
+  res.json({ success: true, message: 'Bot activated. It will automatically react to new posts.' });
 });
 
 app.get('*', (req,res) => { res.sendFile(path.join(__dirname,'public','index.html')); });
