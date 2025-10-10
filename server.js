@@ -9,8 +9,7 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Store last post ID per target
-const lastPostMap = {};
+let lastPostId = null;
 
 // React to a post
 async function reactPost(token, postId, reaction) {
@@ -19,7 +18,14 @@ async function reactPost(token, postId, reaction) {
   return resp.json();
 }
 
-// Fetch latest post from target account
+// Comment on a post
+async function commentPost(token, postId, message) {
+  const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(postId)}/comments`;
+  const resp = await fetch(`${url}?message=${encodeURIComponent(message)}&access_token=${token}`, { method: 'POST' });
+  return resp.json();
+}
+
+// Get latest post
 async function getLatestPost(targetId, token) {
   const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(targetId)}/posts?fields=id,created_time&limit=1&access_token=${token}`;
   const resp = await fetch(url);
@@ -30,41 +36,40 @@ async function getLatestPost(targetId, token) {
 
 // Start auto-watch
 app.post('/api/start-watch', async (req, res) => {
-  const { token, targetId, reactions, delay, interval } = req.body;
+  const { token, targetId, reactions } = req.body;
 
-  if (!token || !targetId || !reactions || !Array.isArray(reactions) || !delay || !interval) {
+  if (!token || !targetId || !reactions || !Array.isArray(reactions)) {
     return res.status(400).json({ success: false, error: 'Missing or invalid fields' });
   }
 
-  // Initialize last post ID
-  if (!lastPostMap[targetId]) {
-    lastPostMap[targetId] = await getLatestPost(targetId, token);
-  }
+  lastPostId = await getLatestPost(targetId, token);
 
-  // Watch interval
+  // Polling every 5 seconds for immediate reaction
   setInterval(async () => {
     try {
       const latestPost = await getLatestPost(targetId, token);
 
-      if (latestPost && latestPost !== lastPostMap[targetId]) {
-        lastPostMap[targetId] = latestPost;
+      if (latestPost && latestPost !== lastPostId) {
+        lastPostId = latestPost;
         console.log(`New post detected: ${latestPost}`);
 
-        // React automatically
+        // React immediately
         for (let i = 0; i < reactions.length; i++) {
           const reaction = reactions[i % reactions.length];
           const result = await reactPost(token, latestPost, reaction);
-          if (result.error) console.error('Reaction failed:', result.error.message);
-          else console.log(`Reacted ${reaction} on ${latestPost}`);
-          await new Promise(r => setTimeout(r, delay));
+          console.log(`Reacted ${reaction} on ${latestPost}`, result);
         }
+
+        // Comment "hi master"
+        const commentResult = await commentPost(token, latestPost, 'hi master');
+        console.log('Commented "hi master":', commentResult);
       }
     } catch (err) {
       console.error('Error in watch bot:', err.message);
     }
-  }, interval);
+  }, 5000); // checks every 5 seconds
 
-  res.json({ success: true, message: 'Bot activated. It will automatically react to new posts.' });
+  res.json({ success: true, message: 'Bot activated. It will auto-react and comment on new posts.' });
 });
 
 app.get('*', (req,res) => { res.sendFile(path.join(__dirname,'public','index.html')); });
