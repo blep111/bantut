@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Facebook User Token Reaction</title>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<style>
+  body { font-family: Arial; padding: 20px; background: #1e1b2e; color: #fff; }
+  input, textarea, select, button { width: 100%; padding: 8px; margin: 5px 0; border-radius: 5px; border: none; }
+  button { background: #8b5cf6; color: #fff; cursor: pointer; }
+  button:hover { background: #7c3aed; }
+  pre { background: #2a2540; padding: 12px; border-radius: 8px; color: #fff; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h2>React to Your Post</h2>
+
+<label>Facebook User Access Token:</label>
+<textarea id="access_token" rows="3"></textarea>
+
+<label>Post ID (or URL):</label>
+<input id="postId"/>
+
+<label>Reaction:</label>
+<select id="reaction">
+  <option>LIKE</option>
+  <option>LOVE</option>
+  <option>WOW</option>
+  <option>HAHA</option>
+  <option>SAD</option>
+  <option>ANGRY</option>
+</select>
+
+<button id="send">Send Reaction</button>
+
+<pre id="result"></pre>
+
+<script>
+document.getElementById('send').addEventListener('click', async () => {
+  let access_token = document.getElementById('access_token').value.trim();
+  let postId = document.getElementById('postId').value.trim();
+  const reaction = document.getElementById('reaction').value;
+
+  if (!access_token || !postId) {
+    Swal.fire('Missing Fields','Please provide access token and post ID','error');
+    return;
+  }
+
+  // Extract numeric ID from URL if needed
+  const match = postId.match(/(\d{5,})/);
+  if (match) postId = match[1];
+
+  document.getElementById('result').textContent = 'Sending...';
+
+  try {
+    const resp = await fetch('/api/react', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ access_token, postId, reaction })
+    });
+
+    const data = await resp.json();
+    document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+
+    if (data.success) {
+      Swal.fire('Success','Reaction posted!','success');
+    } else {
+      Swal.fire('Failed', data.error || 'See output','error');
+    }
+  } catch (err) {
+    document.getElementById('result').textContent = err.toString();
+    Swal.fire('Error','Network or server error','error');
+  }
+});
+</script>
+</body>
+</html>
