@@ -1,109 +1,160 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>Multi Facebook Live Bot (Only-new-posts + Token Keepalive)</title>
+<meta charset="utf-8">
+<title>Token Manager + Multi Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
-  body { font-family: Arial, sans-serif; background: #0f1724; color: #e6eef8; padding: 20px; }
-  .card { background: #0b1220; padding: 16px; border-radius: 8px; max-width: 760px; margin: 12px auto; }
-  input, textarea { width:100%; padding:8px; border-radius:6px; border: none; margin:8px 0; }
-  button { padding:10px 14px; border-radius:6px; border:none; cursor:pointer; background:#2563eb; color:white; margin-right:8px; }
-  pre { background:#071124; padding:12px; border-radius:6px; overflow:auto; color:#9eeaf9; }
-  label { font-weight:600; font-size:14px; }
+  body{font-family:Arial;background:#0f1724;color:#e6eef8;padding:20px;}
+  .box{background:#071427;padding:16px;border-radius:8px;max-width:900px;margin:12px auto;}
+  input,textarea,button{width:100%;padding:8px;border-radius:6px;border:none;margin:6px 0;}
+  .row {display:flex; gap:12px;}
+  .col {flex:1;}
+  .small{width:120px;}
+  button.primary{background:#2563eb;color:white;cursor:pointer;}
+  button.warn{background:#ef4444;color:white;cursor:pointer;}
+  pre{background:#021022;padding:12px;border-radius:6px;overflow:auto;}
+  label{font-weight:600;}
+  table{width:100%;border-collapse:collapse;margin-top:8px;}
+  th,td{padding:8px;border-bottom:1px solid #183240;text-align:left;}
 </style>
 </head>
 <body>
-  <div class="card">
-    <h2>Multi Facebook Live Bot — Only new posts</h2>
+  <div class="box">
+    <h2>Secure Token Store & Multi-Bot</h2>
 
-    <label>Account Tokens (one per line)</label>
-    <textarea id="tokens" placeholder="paste one token per line"></textarea>
+    <h3>Add Token (your own accounts only)</h3>
+    <label>Token</label>
+    <textarea id="newToken" placeholder="Paste full token here"></textarea>
+    <label>Name (optional)</label>
+    <input id="newName" placeholder="Account name (e.g., acc1)"/>
+    <button id="addTokenBtn" class="primary">Add Token</button>
 
-    <label>Target ID (user/page you can access)</label>
-    <input id="targetId" placeholder="e.g. 1000123456789">
+    <h3>Stored Accounts</h3>
+    <div id="tokensArea">Loading tokens...</div>
 
+    <h3>Bot Controls</h3>
+    <label>Target ID (User/Page you can access)</label>
+    <input id="targetId" placeholder="Target ID (e.g. 1000123456789)"/>
     <label>Reactions (comma separated)</label>
-    <input id="reactions" value="LIKE,LOVE,HAHA">
+    <input id="reactions" value="LIKE,LOVE,HAHA"/>
+    <label>Comment</label>
+    <input id="comment" value="hi master"/>
 
-    <label>Comment text</label>
-    <input id="comment" value="hi master">
-
-    <label>Optional: Facebook App ID (for token exchange and validation)</label>
-    <input id="appId" placeholder="App ID (optional)">
-
-    <label>Optional: Facebook App Secret (for token exchange - keep secret)</label>
-    <input id="appSecret" placeholder="App Secret (optional)" type="password">
-
-    <div style="margin-top:12px;">
-      <button id="startBtn">Start Bot (only-new-posts)</button>
-      <button id="stopBtn">Stop Bot</button>
-      <button id="statusBtn">Status</button>
+    <div class="row">
+      <div class="col"><button id="startBotBtn" class="primary">Start Bot (selected accounts)</button></div>
+      <div class="col small"><button id="stopBotBtn" class="warn">Stop Bot</button></div>
     </div>
 
-    <h3>Output / Status</h3>
-    <pre id="output">Ready</pre>
+    <h3>Status</h3>
+    <pre id="statusPre">No activity yet.</pre>
   </div>
 
 <script>
-const output = document.getElementById('output');
-
-document.getElementById('startBtn').addEventListener('click', async () => {
-  const tokensRaw = document.getElementById('tokens').value.trim();
-  const targetId = document.getElementById('targetId').value.trim();
-  const reactionsRaw = document.getElementById('reactions').value.trim();
-  const comment = document.getElementById('comment').value.trim();
-  const appId = document.getElementById('appId').value.trim();
-  const appSecret = document.getElementById('appSecret').value.trim();
-
-  if (!tokensRaw || !targetId || !reactionsRaw) return Swal.fire('Error','Fill tokens, targetId, reactions','error');
-  const tokens = tokensRaw.split('\n').map(t=>t.trim()).filter(t=>t.length>0);
-  const reactions = reactionsRaw.split(',').map(r=>r.trim().toUpperCase()).filter(r=>r.length>0);
-
-  output.textContent = 'Starting bot...';
-
+async function loadTokens() {
+  const area = document.getElementById('tokensArea');
+  area.innerHTML = 'Loading...';
   try {
-    const resp = await fetch('/api/start-bot', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ tokens, targetId, reactions, comment, appId: appId || null, appSecret: appSecret || null })
+    const r = await fetch('/api/tokens');
+    const j = await r.json();
+    if (!j.success) { area.innerText = 'Failed to load tokens'; return; }
+    if (j.tokens.length === 0) {
+      area.innerHTML = '<div>No tokens stored. Add one above.</div>';
+      return;
+    }
+    // build table with checkboxes
+    const rows = j.tokens.map(t => `
+      <tr>
+        <td><input type="checkbox" class="tokCheck" data-id="${t.id}"></td>
+        <td><strong>${escapeHtml(t.name)}</strong><br><small>${t.id}</small></td>
+        <td>${t.createdAt}</td>
+        <td><button class="delBtn" data-id="${t.id}">Remove</button></td>
+      </tr>
+    `).join('');
+    area.innerHTML = `<table><thead><tr><th>Use</th><th>Account</th><th>Created</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
+    document.querySelectorAll('.delBtn').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute('data-id');
+        if (!confirm('Remove token?')) return;
+        await fetch('/api/tokens/' + encodeURIComponent(id), { method: 'DELETE' });
+        loadTokens();
+      };
     });
-    const data = await resp.json();
-    output.textContent = JSON.stringify(data, null, 2);
-    if (data.success) Swal.fire('Started','Bot started and will only process posts created after activation','success');
   } catch (err) {
-    output.textContent = err.toString();
+    area.innerText = 'Error: ' + err.toString();
+  }
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('addTokenBtn').addEventListener('click', async () => {
+  const token = document.getElementById('newToken').value.trim();
+  const name = document.getElementById('newName').value.trim();
+  if (!token) return Swal.fire('Error','Please paste the token','error');
+  try {
+    const r = await fetch('/api/add-token', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token, name })
+    });
+    const j = await r.json();
+    if (j.success) {
+      Swal.fire('Saved','Token stored locally (encrypted)','success');
+      document.getElementById('newToken').value = '';
+      document.getElementById('newName').value = '';
+      loadTokens();
+    } else {
+      Swal.fire('Error', j.error || 'Failed to save', 'error');
+    }
+  } catch (err) {
     Swal.fire('Error', err.toString(), 'error');
   }
 });
 
-document.getElementById('stopBtn').addEventListener('click', async () => {
+document.getElementById('startBotBtn').addEventListener('click', async () => {
+  const checked = Array.from(document.querySelectorAll('.tokCheck:checked')).map(cb => cb.getAttribute('data-id'));
+  if (checked.length === 0) return Swal.fire('Select accounts','Please select at least one stored account','error');
   const targetId = document.getElementById('targetId').value.trim();
-  if (!targetId) return Swal.fire('Error','Enter targetId','error');
+  const reactions = document.getElementById('reactions').value.trim().split(',').map(s=>s.trim()).filter(Boolean);
+  const comment = document.getElementById('comment').value.trim();
+  if (!targetId || reactions.length === 0) return Swal.fire('Error','Target ID and reactions required','error');
+
+  document.getElementById('statusPre').textContent = 'Starting bot...';
   try {
-    const resp = await fetch('/api/stop-bot', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+    const r = await fetch('/api/start-bot', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tokenIds: checked, targetId, reactions, comment })
+    });
+    const j = await r.json();
+    document.getElementById('statusPre').textContent = JSON.stringify(j, null, 2);
+    if (j.success) Swal.fire('Bot started', j.message, 'success');
+  } catch (err) {
+    document.getElementById('statusPre').textContent = err.toString();
+    Swal.fire('Error', err.toString(), 'error');
+  }
+});
+
+document.getElementById('stopBotBtn').addEventListener('click', async () => {
+  const targetId = document.getElementById('targetId').value.trim();
+  if (!targetId) return Swal.fire('Error','Enter targetId to stop','error');
+  try {
+    const r = await fetch('/api/stop-bot', {
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ targetId })
     });
-    const data = await resp.json();
-    output.textContent = JSON.stringify(data, null, 2);
-    Swal.fire('Stopped', data.message, 'info');
+    const j = await r.json();
+    document.getElementById('statusPre').textContent = JSON.stringify(j, null, 2);
+    Swal.fire('Stopped', j.message, 'info');
   } catch (err) {
-    output.textContent = err.toString();
+    document.getElementById('statusPre').textContent = err.toString();
     Swal.fire('Error', err.toString(), 'error');
   }
 });
 
-document.getElementById('statusBtn').addEventListener('click', async () => {
-  try {
-    const resp = await fetch('/api/status');
-    const data = await resp.json();
-    output.textContent = JSON.stringify(data, null, 2);
-  } catch (err) {
-    output.textContent = err.toString();
-  }
-});
+// initial load
+loadTokens();
 </script>
 </body>
 </html>
