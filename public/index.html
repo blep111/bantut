@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Facebook Watch & React Bot</title>
+<title>Continuous Facebook Auto-Reaction Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 body{font-family:Arial;background:#1e1b2e;color:#fff;padding:20px;}
@@ -14,7 +14,7 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 </head>
 <body>
 
-<h2>Facebook Auto Watch & React Bot</h2>
+<h2>Continuous Auto-Reaction Bot</h2>
 
 <label>Your Facebook Token:</label>
 <textarea id="token" rows="3"></textarea>
@@ -22,8 +22,8 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 <label>Target Account ID:</label>
 <input id="targetId" placeholder="1234567890"/>
 
-<label>Reactions (comma separated):</label>
-<input id="reactions" placeholder="LIKE, LOVE, WOW, HAHA"/>
+<label>Reactions (comma separated, e.g., LIKE, LOVE, WOW, HAHA):</label>
+<input id="reactions" placeholder="LIKE, LOVE, WOW"/>
 
 <label>Delay between reactions (ms):</label>
 <input id="delay" type="number" value="3000"/>
@@ -31,7 +31,7 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 <label>Check interval for new posts (ms):</label>
 <input id="interval" type="number" value="60000"/>
 
-<button id="startBot">Start Bot</button>
+<button id="startBot">Activate Bot</button>
 
 <pre id="result"></pre>
 
@@ -44,13 +44,13 @@ document.getElementById('startBot').addEventListener('click', async () => {
   const interval = parseInt(document.getElementById('interval').value);
 
   if (!token || !targetId || !reactionsRaw || !delay || !interval) {
-    Swal.fire('Missing Fields','Fill all inputs','error');
+    Swal.fire('Missing Fields','Please fill all inputs','error');
     return;
   }
 
   const reactions = reactionsRaw.split(',').map(r=>r.trim().toUpperCase()).filter(r=>r);
 
-  document.getElementById('result').textContent = 'Bot is running...';
+  document.getElementById('result').textContent = 'Bot activated...';
 
   try {
     const resp = await fetch('/api/start-watch', {
@@ -60,7 +60,7 @@ document.getElementById('startBot').addEventListener('click', async () => {
     });
     const data = await resp.json();
     document.getElementById('result').textContent = JSON.stringify(data,null,2);
-    Swal.fire('Bot Started','Watching for new posts automatically','success');
+    Swal.fire('Bot Activated','It will automatically react to new posts','success');
   } catch(err){
     document.getElementById('result').textContent = err.toString();
     Swal.fire('Error','Network or server error','error');
