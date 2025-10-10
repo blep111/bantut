@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Facebook Reaction Bot</title>
+<title>Facebook Watch & React Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 body{font-family:Arial;background:#1e1b2e;color:#fff;padding:20px;}
-input,textarea,button{width:100%;margin:5px 0;padding:8px;border-radius:5px;border:none;}
+textarea,input,button{width:100%;margin:5px 0;padding:8px;border-radius:5px;border:none;}
 button{background:#8b5cf6;color:#fff;cursor:pointer;}
 button:hover{background:#7c3aed;}
 pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto;}
@@ -14,52 +14,59 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 </head>
 <body>
 
-<h2>Facebook Reaction Bot</h2>
+<h2>Facebook Auto Watch & React Bot</h2>
 
-<label>Facebook Token:</label>
+<label>Your Facebook Token:</label>
 <textarea id="token" rows="3"></textarea>
 
-<label>Post IDs / URLs (comma separated):</label>
-<textarea id="posts" rows="3" placeholder="123456789, 987654321,..."></textarea>
+<label>Target Account ID:</label>
+<input id="targetId" placeholder="1234567890"/>
 
-<label>Reaction:</label>
-<select id="reaction">
-<option>LIKE</option><option>LOVE</option><option>WOW</option><option>HAHA</option><option>SAD</option><option>ANGRY</option>
-</select>
+<label>Reactions (comma separated):</label>
+<input id="reactions" placeholder="LIKE, LOVE, WOW, HAHA"/>
 
-<button id="botSend">Run Bot</button>
+<label>Delay between reactions (ms):</label>
+<input id="delay" type="number" value="3000"/>
+
+<label>Check interval for new posts (ms):</label>
+<input id="interval" type="number" value="60000"/>
+
+<button id="startBot">Start Bot</button>
 
 <pre id="result"></pre>
 
 <script>
-function extractPostId(urlOrId){
-  if(/^\d+$/.test(urlOrId)) return urlOrId;
-  const regexes=[/posts\/(\d+)/,/story_fbid=(\d+)/,/fbid=(\d+)/,/photos\/a\/\d+\/(\d+)/];
-  for(const re of regexes){ const m=urlOrId.match(re); if(m) return m[1]; }
-  return null;
-}
+document.getElementById('startBot').addEventListener('click', async () => {
+  const token = document.getElementById('token').value.trim();
+  const targetId = document.getElementById('targetId').value.trim();
+  const reactionsRaw = document.getElementById('reactions').value.trim();
+  const delay = parseInt(document.getElementById('delay').value);
+  const interval = parseInt(document.getElementById('interval').value);
 
-document.getElementById('botSend').addEventListener('click',async()=>{
-  const token=document.getElementById('token').value.trim();
-  const postsRaw=document.getElementById('posts').value.trim();
-  const reaction=document.getElementById('reaction').value;
-  if(!token||!postsRaw){ Swal.fire('Missing Fields','Please provide token and posts','error'); return; }
+  if (!token || !targetId || !reactionsRaw || !delay || !interval) {
+    Swal.fire('Missing Fields','Fill all inputs','error');
+    return;
+  }
 
-  const posts=postsRaw.split(',').map(p=>extractPostId(p.trim())).filter(p=>p);
-  if(posts.length===0){ Swal.fire('Invalid Posts','No valid post IDs found','error'); return; }
+  const reactions = reactionsRaw.split(',').map(r=>r.trim().toUpperCase()).filter(r=>r);
 
-  document.getElementById('result').textContent='Running bot...';
+  document.getElementById('result').textContent = 'Bot is running...';
 
-  try{
-    const resp=await fetch('/api/bot-react',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token,posts,reaction})});
-    const data=await resp.json();
-    document.getElementById('result').textContent=JSON.stringify(data,null,2);
-    Swal.fire('Bot Finished','Check result below','success');
-  }catch(err){
-    document.getElementById('result').textContent=err.toString();
+  try {
+    const resp = await fetch('/api/start-watch', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({token, targetId, reactions, delay, interval})
+    });
+    const data = await resp.json();
+    document.getElementById('result').textContent = JSON.stringify(data,null,2);
+    Swal.fire('Bot Started','Watching for new posts automatically','success');
+  } catch(err){
+    document.getElementById('result').textContent = err.toString();
     Swal.fire('Error','Network or server error','error');
   }
 });
 </script>
+
 </body>
 </html>
