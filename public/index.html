@@ -3,46 +3,68 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Facebook Boosting</title>
+<title>FB Boosting Dashboard</title>
 <style>
-/* ===== General ===== */
-body { margin:0; font-family: Arial, sans-serif; background: #1e1b2e; color: #fff; }
-nav { display:flex; justify-content:space-between; align-items:center; padding:1rem; background:#111; }
-nav h1 { font-size:1.5rem; color:#8b5cf6; }
-#token-list div { margin: 0.2rem 0; color: #8b5cf6; font-size:0.9rem; }
-main { padding: 2rem; max-width:800px; margin: auto; }
-input { padding: 0.5rem; margin-right: 0.5rem; border-radius:5px; border:none; width: 200px; }
-button { padding: 0.5rem 1rem; border:none; border-radius:5px; background:#8b5cf6; color:white; cursor:pointer; margin-top:0.5rem; }
-button:hover { background:#7c3aed; }
-section { margin-bottom: 2rem; }
-#status { margin-top: 1rem; font-weight:bold; color: #10b981; }
+/* ===== Reset & general ===== */
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background:#f0f2f5; color:#050505; }
+
+/* ===== Navbar ===== */
+nav {
+  display:flex; justify-content:space-between; align-items:center;
+  background:#1877f2; color:white; padding:0.8rem 2rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+nav h1 { font-size:1.5rem; font-weight:bold; }
+#token-list { display:flex; gap:0.5rem; flex-wrap:wrap; }
+
+/* ===== Main container ===== */
+main { max-width:900px; margin:2rem auto; display:flex; flex-direction:column; gap:1.5rem; }
+
+/* ===== Card style ===== */
+.card { background:white; border-radius:8px; padding:1rem 1.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+.card h2 { margin-bottom:1rem; color:#1877f2; }
+
+/* ===== Inputs & buttons ===== */
+input { padding:0.5rem; border-radius:5px; border:1px solid #ddd; width:100%; margin-bottom:0.5rem; }
+button { padding:0.5rem 1rem; border:none; border-radius:5px; background:#1877f2; color:white; cursor:pointer; font-weight:bold; }
+button:hover { background:#145dbf; }
+button:disabled { background:#a3cdfd; cursor:not-allowed; }
 
 /* ===== Sections ===== */
-#add-token, #bot-controls { display:flex; flex-wrap: wrap; gap: 0.5rem; }
-#add-token input, #bot-controls input { flex:1; min-width:150px; }
-#add-token button, #bot-controls button { flex-shrink:0; }
+#token-list div { background:#e7f3ff; color:#1877f2; padding:0.3rem 0.5rem; border-radius:5px; font-size:0.85rem; }
+#status { font-weight:bold; margin-top:0.5rem; color:#10b981; }
+section { display:flex; flex-direction:column; gap:0.5rem; }
+
+/* ===== Responsive ===== */
+@media (min-width:600px){
+  #add-token, #bot-controls { flex-direction:row; gap:0.5rem; align-items:flex-end; }
+  input { width:auto; flex:1; margin-bottom:0; }
+}
 </style>
 </head>
 <body>
 <nav>
-  <h1>FB Boosting Dashboard</h1>
+  <h1>Facebook Boosting</h1>
   <div id="token-list"></div>
 </nav>
 
 <main>
-  <section id="add-token">
+  <div class="card" id="add-token">
+    <h2>Add Token</h2>
     <input type="text" id="new-token" placeholder="Enter Facebook token">
     <button id="addTokenBtn">Add Token</button>
-  </section>
+  </div>
 
-  <section id="bot-controls">
+  <div class="card" id="bot-controls">
+    <h2>Bot Controls</h2>
     <input type="text" id="targetId" placeholder="Target ID">
     <input type="text" id="commentText" placeholder="Comment text">
     <button id="startBotBtn">Start Bot</button>
     <button id="stopBotBtn">Stop Bot</button>
-  </section>
+  </div>
 
-  <section id="status"></section>
+  <div class="card" id="status"></div>
 </main>
 
 <script>
@@ -58,17 +80,13 @@ const statusEl = document.getElementById('status');
 const loadTokens = async () => {
   const res = await fetch('/api/tokens');
   const data = await res.json();
-  tokenList.innerHTML = data.tokens.map(t => `<div>${t.substring(0, 10)}...</div>`).join('');
+  tokenList.innerHTML = data.tokens.map(t => `<div>${t.substring(0,10)}...</div>`).join('');
 };
 
 addTokenBtn.addEventListener('click', async () => {
   const token = newTokenInput.value.trim();
-  if (!token) return alert('Enter token');
-  await fetch('/api/token/add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token })
-  });
+  if(!token) return alert('Enter token');
+  await fetch('/api/token/add', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token}) });
   newTokenInput.value = '';
   loadTokens();
 });
@@ -76,17 +94,13 @@ addTokenBtn.addEventListener('click', async () => {
 startBotBtn.addEventListener('click', async () => {
   const targetId = targetIdInput.value.trim();
   const commentText = commentInput.value.trim();
-  if (!targetId) return alert('Enter target ID');
-  await fetch('/api/bot/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ targetId, commentText })
-  });
+  if(!targetId) return alert('Enter target ID');
+  await fetch('/api/bot/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targetId, commentText}) });
   statusEl.textContent = 'Bot running...';
 });
 
 stopBotBtn.addEventListener('click', async () => {
-  await fetch('/api/bot/stop', { method: 'POST' });
+  await fetch('/api/bot/stop', { method:'POST' });
   statusEl.textContent = 'Bot stopped';
 });
 
