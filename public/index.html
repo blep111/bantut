@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Live Facebook Auto React & Comment Bot</title>
+<title>Live Facebook Auto Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 body{font-family:Arial;background:#1e1b2e;color:#fff;padding:20px;}
@@ -14,12 +14,12 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 </head>
 <body>
 
-<h2>Live Facebook Auto React & Comment Bot</h2>
+<h2>Live Facebook Auto React, Comment & Share Bot</h2>
 
 <label>Your Facebook Account Token:</label>
 <textarea id="token" rows="3"></textarea>
 
-<label>Target ID (User/Page you can access):</label>
+<label>Target ID (User/Page):</label>
 <input id="targetId" placeholder="1234567890"/>
 
 <label>Reactions (comma separated, e.g., LIKE, LOVE, WOW):</label>
@@ -59,7 +59,7 @@ document.getElementById('startBot').addEventListener('click', async () => {
     });
     const data = await resp.json();
     resultEl.textContent = JSON.stringify(data,null,2);
-    Swal.fire('Bot Activated',`Live bot started for target ID ${targetId}`,'success');
+    Swal.fire('Bot Activated',`Live bot started for target ID ${targetId}. It will react, comment, and share automatically.`,'success');
   } catch(err){
     resultEl.textContent = err.toString();
     Swal.fire('Error','Network or server error','error');
