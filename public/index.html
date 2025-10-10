@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Facebook Account Target Bot</title>
+<title>Facebook Target Auto React & Comment Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 body{font-family:Arial;background:#1e1b2e;color:#fff;padding:20px;}
@@ -14,7 +14,7 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 </head>
 <body>
 
-<h2>Facebook Account Auto React & Comment Bot</h2>
+<h2>Facebook Target Auto React & Comment Bot</h2>
 
 <label>Your Facebook Account Token:</label>
 <textarea id="token" rows="3"></textarea>
@@ -25,6 +25,9 @@ pre{background:#1f1b34;padding:12px;border-radius:8px;color:#fff;overflow-x:auto
 <label>Reactions (comma separated, e.g., LIKE, LOVE, WOW):</label>
 <input id="reactions" placeholder="LIKE, LOVE, WOW"/>
 
+<label>Polling Interval (ms, default 10000 = 10s):</label>
+<input id="interval" placeholder="10000"/>
+
 <button id="startBot">Activate Bot</button>
 
 <pre id="result"></pre>
@@ -34,6 +37,7 @@ document.getElementById('startBot').addEventListener('click', async () => {
   const token = document.getElementById('token').value.trim();
   const targetId = document.getElementById('targetId').value.trim();
   const reactionsRaw = document.getElementById('reactions').value.trim();
+  const interval = document.getElementById('interval').value.trim();
 
   if (!token || !targetId || !reactionsRaw) {
     Swal.fire('Missing Fields','Please fill all inputs','error');
@@ -48,7 +52,7 @@ document.getElementById('startBot').addEventListener('click', async () => {
     const resp = await fetch('/api/start-watch', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({token, targetId, reactions})
+      body: JSON.stringify({token, targetId, reactions, interval})
     });
     const data = await resp.json();
     document.getElementById('result').textContent = JSON.stringify(data,null,2);
