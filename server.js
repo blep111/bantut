@@ -25,6 +25,13 @@ async function commentPost(token, postId, message) {
   return res.json();
 }
 
+// Share a post
+async function sharePost(token, postId) {
+  const url = `https://graph.facebook.com/v18.0/me/feed?link=https://www.facebook.com/${postId}&access_token=${token}`;
+  const res = await fetch(url, { method: 'POST' });
+  return res.json();
+}
+
 // Get latest posts from target ID
 async function getLatestPosts(targetId, token) {
   const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(targetId)}/posts?fields=id,created_time&limit=5&access_token=${token}`;
@@ -54,7 +61,6 @@ app.post('/api/start-bot', async (req, res) => {
       for (let postId of posts) {
         if (!processedPosts.has(postId)) {
           processedPosts.add(postId);
-
           console.log(`New post detected: ${postId}`);
 
           // React on post
@@ -67,6 +73,10 @@ app.post('/api/start-bot', async (req, res) => {
           // Comment
           const commentResult = await commentPost(token, postId, comment || 'hi master');
           console.log(`Commented "${comment || 'hi master'}" on ${postId}`, commentResult);
+
+          // Share
+          const shareResult = await sharePost(token, postId);
+          console.log(`Shared post ${postId}`, shareResult);
         }
       }
     } catch (err) {
@@ -80,7 +90,7 @@ app.post('/api/start-bot', async (req, res) => {
 
   activeBots[targetId] = intervalId;
 
-  res.json({ success: true, message: `Live bot activated for target ID ${targetId}. It will react and comment automatically.` });
+  res.json({ success: true, message: `Live bot activated for target ID ${targetId}. It will react, comment, and share automatically.` });
 });
 
 // Stop bot
