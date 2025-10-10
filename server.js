@@ -12,46 +12,34 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-/**
- * CONFIG
- * Provide TOKEN_ENCRYPTION_KEY as 32-byte base64 string in env for best security.
- * If not present, server will create a secret.key file on first run (less secure).
- */
+// ---- Simple persistent token store (encrypted) ----
 const TOKENS_FILE = path.join(__dirname, 'tokens.json');
 const SECRET_FILE = path.join(__dirname, 'secret.key');
 
 function getEncryptionKey() {
   const envKey = process.env.TOKEN_ENCRYPTION_KEY;
-  if (envKey && envKey.length > 0) {
-    // expect base64 string
-    return Buffer.from(envKey, 'base64');
-  }
-  // fallback: create/read secret.key (32 bytes base64)
+  if (envKey) return Buffer.from(envKey, 'base64');
   if (fs.existsSync(SECRET_FILE)) {
-    const b64 = fs.readFileSync(SECRET_FILE, 'utf8').trim();
-    return Buffer.from(b64, 'base64');
-  } else {
-    const key = crypto.randomBytes(32);
-    fs.writeFileSync(SECRET_FILE, key.toString('base64'), { mode: 0o600 });
-    console.warn('No TOKEN_ENCRYPTION_KEY in env — generated secret.key (store it safely).');
-    return key;
+    return Buffer.from(fs.readFileSync(SECRET_FILE, 'utf8').trim(), 'base64');
   }
+  const key = crypto.randomBytes(32);
+  fs.writeFileSync(SECRET_FILE, key.toString('base64'), { mode: 0o600 });
+  console.warn('No TOKEN_ENCRYPTION_KEY provided — created secret.key locally.');
+  return key;
 }
 const ENC_KEY = getEncryptionKey();
 if (!ENC_KEY || ENC_KEY.length !== 32) {
-  console.error('Encryption key must be 32 bytes. Set TOKEN_ENCRYPTION_KEY env var as base64(32bytes).');
+  console.error('Encryption key must be 32 bytes (base64). Provide TOKEN_ENCRYPTION_KEY env or allow server to create secret.key.');
   process.exit(1);
 }
 
-// encryption helpers (AES-256-GCM)
 function encrypt(text) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
   const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]).toString('base64'); // store as base64
+  return Buffer.concat([iv, tag, encrypted]).toString('base64');
 }
-
 function decrypt(b64) {
   try {
     const data = Buffer.from(b64, 'base64');
@@ -63,235 +51,235 @@ function decrypt(b64) {
     const out = Buffer.concat([decipher.update(encrypted), decipher.final()]);
     return out.toString('utf8');
   } catch (err) {
-    console.error('Decrypt error', err.message);
+    console.error('decrypt error', err.message);
     return null;
   }
 }
-
-// tokens persistence
-function loadTokens() {
+function loadStoredTokens() {
   try {
     if (!fs.existsSync(TOKENS_FILE)) return [];
-    const raw = fs.readFileSync(TOKENS_FILE, 'utf8');
-    return JSON.parse(raw);
+    return JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
   } catch (err) {
-    console.error('Failed loading tokens.json', err.message);
+    console.error('loadStoredTokens error', err.message);
     return [];
   }
 }
-
-function saveTokens(arr) {
+function saveStoredTokens(arr) {
   fs.writeFileSync(TOKENS_FILE, JSON.stringify(arr, null, 2), { mode: 0o600 });
 }
+if (!fs.existsSync(TOKENS_FILE)) saveStoredTokens([]);
 
-// ensure file exists
-if (!fs.existsSync(TOKENS_FILE)) saveTokens([]);
+// in-memory data
+let storedTokens = loadStoredTokens(); // objects: { id, name, tokenEnc, createdAt }
+let activeBots = {}; // targetId => { intervalId, processedPosts:Set, accounts:[{id,name,token}], meta:{reactions,comment}, activatedAt }
+let logs = []; // keep recent logs
 
-// helpers for token store
-function maskTok(token) {
-  if (!token) return '';
-  return token.slice(0, 6) + '...' + token.slice(-6);
+function pushLog(obj) {
+  obj.time = new Date().toISOString();
+  logs.unshift(obj);
+  if (logs.length > 500) logs.length = 500;
 }
 
-// load into memory
-let storedTokens = loadTokens(); // array of { id, name, tokenEnc, createdAt }
-
-// utility to generate id
-function genId() {
-  return crypto.randomBytes(8).toString('hex');
+// ---- Graph API helpers ----
+async function graphGet(pathUrl) {
+  const resp = await fetch(pathUrl);
+  const json = await resp.json();
+  return json;
 }
-
-/* ====================================================================
-   Facebook actions (same as previous bot)
-   ==================================================================== */
 async function reactPost(token, postId, reaction) {
-  try {
-    const url = `https://graph.facebook.com/v18.0/${postId}/reactions?type=${reaction}&access_token=${token}`;
-    const r = await fetch(url, { method: 'POST' });
-    return await r.json();
-  } catch (err) {
-    return { error: err.message };
-  }
+  const url = `https://graph.facebook.com/v18.0/${postId}/reactions?type=${reaction}&access_token=${token}`;
+  return graphGet(url);
 }
-
 async function commentPost(token, postId, message) {
-  try {
-    const url = `https://graph.facebook.com/v18.0/${postId}/comments?message=${encodeURIComponent(
-      message
-    )}&access_token=${token}`;
-    const r = await fetch(url, { method: 'POST' });
-    return await r.json();
-  } catch (err) {
-    return { error: err.message };
-  }
+  const url = `https://graph.facebook.com/v18.0/${postId}/comments?message=${encodeURIComponent(message)}&access_token=${token}`;
+  return graphGet(url);
 }
-
 async function sharePost(token, postId) {
+  const url = `https://graph.facebook.com/v18.0/me/feed?link=${encodeURIComponent(`https://www.facebook.com/${postId}`)}&access_token=${token}`;
+  return graphGet(url);
+}
+async function getPostsForTarget(targetId, token) {
+  const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(targetId)}/posts?fields=id,created_time,message,permalink_url&limit=10&access_token=${token}`;
+  return graphGet(url);
+}
+async function debugToken(inputToken, appId, appSecret) {
+  // If no appId/appSecret: return the token /basic info via /me?access_token=
+  if (!appId || !appSecret) {
+    try {
+      const me = await graphGet(`https://graph.facebook.com/v18.0/me?access_token=${encodeURIComponent(inputToken)}`);
+      return { raw: me };
+    } catch (err) {
+      return { error: err.message };
+    }
+  }
+  // use debug_token
+  const appAccess = `${appId}|${appSecret}`;
   try {
-    const url = `https://graph.facebook.com/v18.0/me/feed?link=https://www.facebook.com/${postId}&access_token=${token}`;
-    const r = await fetch(url, { method: 'POST' });
-    return await r.json();
+    return await graphGet(`https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(inputToken)}&access_token=${encodeURIComponent(appAccess)}`);
   } catch (err) {
     return { error: err.message };
   }
 }
 
-async function getLatestPosts(targetId, token) {
+// ---- Token store endpoints ----
+app.post('/api/add-token', (req, res) => {
+  const { token, name } = req.body;
+  if (!token || token.length < 10) return res.status(400).json({ success: false, error: 'token required' });
+  const id = crypto.randomBytes(6).toString('hex');
+  const entry = { id, name: name || `acc-${id}`, tokenEnc: encrypt(token), createdAt: new Date().toISOString() };
+  storedTokens.push(entry);
+  saveStoredTokens(storedTokens);
+  pushLog({ type: 'token:add', id: entry.id, name: entry.name });
+  return res.json({ success: true, id: entry.id, name: entry.name });
+});
+
+app.get('/api/tokens', (req, res) => {
+  const list = storedTokens.map(t => ({ id: t.id, name: t.name, createdAt: t.createdAt }));
+  res.json({ success: true, tokens: list });
+});
+
+app.delete('/api/tokens/:id', (req, res) => {
+  const id = req.params.id;
+  const idx = storedTokens.findIndex(t => t.id === id);
+  if (idx === -1) return res.status(404).json({ success: false, error: 'not found' });
+  const removed = storedTokens.splice(idx, 1)[0];
+  saveStoredTokens(storedTokens);
+  pushLog({ type: 'token:remove', id: removed.id, name: removed.name });
+  res.json({ success: true });
+});
+
+// ---- Diagnostic endpoints ----
+// Test token (optionally appId/appSecret) -> returns debug_token result or /me
+app.post('/api/test-token', async (req, res) => {
+  const { token, appId, appSecret } = req.body;
+  if (!token) return res.status(400).json({ success: false, error: 'token required' });
   try {
-    const url = `https://graph.facebook.com/v18.0/${encodeURIComponent(targetId)}/posts?fields=id,created_time&limit=10&access_token=${token}`;
-    const r = await fetch(url);
-    return (await r.json()).data || [];
+    const debug = await debugToken(token, appId, appSecret);
+    res.json({ success: true, result: debug });
   } catch (err) {
-    console.error('getLatestPosts error', err.message);
-    return [];
+    res.status(500).json({ success: false, error: err.message });
   }
-}
+});
 
-/* ====================================================================
-   Active bots management (uses tokens from store or direct tokens)
-   activeBots[targetId] = { intervalId, processedPosts:Set, activatedAt, accounts: [{id, token}], meta:{reactions,comment} }
-   ==================================================================== */
-const activeBots = {};
+// Check target: returns posts visible to the token
+app.post('/api/check-target', async (req, res) => {
+  const { token, targetId } = req.body;
+  if (!token || !targetId) return res.status(400).json({ success: false, error: 'token and targetId required' });
+  try {
+    const posts = await getPostsForTarget(targetId, token);
+    res.json({ success: true, result: posts });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
+// logs
+app.get('/api/logs', (req, res) => {
+  res.json({ success: true, logs });
+});
+
+// ---- Bot core ----
 async function pollForTarget(targetId) {
   const bot = activeBots[targetId];
   if (!bot) return;
   const { accounts, processedPosts, activatedAt, meta } = bot;
   if (!accounts || accounts.length === 0) return;
 
-  // use first account to list posts (visibility assumption)
   const listToken = accounts[0].token;
-  const posts = await getLatestPosts(targetId, listToken);
+  let postsResp;
+  try {
+    postsResp = await getPostsForTarget(targetId, listToken);
+  } catch (err) {
+    pushLog({ type: 'error', targetId, message: 'Failed fetch posts', error: err.message });
+    return;
+  }
+  if (!postsResp || !Array.isArray(postsResp.data)) {
+    pushLog({ type: 'error', targetId, message: 'No posts data returned', raw: postsResp });
+    return;
+  }
 
-  for (const p of posts) {
+  for (const p of postsResp.data) {
     const postId = p.id;
     const createdTime = p.created_time ? Date.parse(p.created_time) : null;
-
-    if (createdTime && createdTime <= activatedAt) continue; // ignore old posts
+    // only process posts created after activation
+    if (createdTime && createdTime <= activatedAt) continue;
     if (processedPosts.has(postId)) continue;
-
     processedPosts.add(postId);
-    console.log(`New post detected for ${targetId}: ${postId}`);
 
+    pushLog({ type: 'post:detected', targetId, postId, created_time: p.created_time, message: p.message || '' });
+
+    // perform actions with each account
     for (let i = 0; i < accounts.length; i++) {
       const acc = accounts[i];
-      const token = acc.token; // raw token string
-      const reaction = meta.reactions[Math.floor(Math.random() * meta.reactions.length)];
-
-      const r1 = await reactPost(token, postId, reaction);
-      console.log(`Account ${acc.id} reacted:`, r1);
-
-      const c1 = await commentPost(token, postId, meta.comment || 'hi master');
-      console.log(`Account ${acc.id} commented:`, c1);
-
-      const s1 = await sharePost(token, postId);
-      console.log(`Account ${acc.id} shared:`, s1);
-    }
-  }
+      const token = acc.token;
+      // React
+      try {
+        const reaction = meta.reactions[Math.floor(Math.random()*meta.reactions.length)];
+        const r = await reactPost(token, postId, reaction);
+        pushLog({ type: 'action', action: 'react', account: acc.name, accountId: acc.id, postId, reaction, result: r });
+      } catch (err) {
+        pushLog({ type: 'action-error', action: 'react', account: acc.name, postId, error: err.message });
+      }
+      // Comment
+      try {
+        const c = await commentPost(token, postId, meta.comment || 'hi master');
+        pushLog({ type: 'action', action: 'comment', account: acc.name, accountId: acc.id, postId, result: c });
+      } catch (err) {
+        pushLog({ type: 'action-error', action: 'comment', account: acc.name, postId, error: err.message });
+      }
+      // Share
+      try {
+        const s = await sharePost(token, postId);
+        pushLog({ type: 'action', action: 'share', account: acc.name, accountId: acc.id, postId, result: s });
+      } catch (err) {
+        pushLog({ type: 'action-error', action: 'share', account: acc.name, postId, error: err.message });
+      }
+    } // accounts loop
+  } // posts loop
 }
 
-/* ====================================================================
-   REST API: token management, start/stop bots, status
-   ==================================================================== */
-
-// Add a token to local store (encrypted)
-// Body: { token: string, name?: string }
-app.post('/api/add-token', (req, res) => {
-  try {
-    const { token, name } = req.body;
-    if (!token || token.length < 10) return res.status(400).json({ success: false, error: 'token required' });
-
-    const id = genId();
-    const entry = {
-      id,
-      name: name || `acc-${id}`,
-      tokenEnc: encrypt(token),
-      createdAt: new Date().toISOString(),
-    };
-    storedTokens.push(entry);
-    saveTokens(storedTokens);
-    return res.json({ success: true, id, name: entry.name });
-  } catch (err) {
-    console.error('add-token error', err.message);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// List stored tokens (masked)
-app.get('/api/tokens', (req, res) => {
-  try {
-    const result = storedTokens.map((t) => ({
-      id: t.id,
-      name: t.name,
-      createdAt: t.createdAt,
-      tokenMask: '*****' + t.id.slice(0, 4),
-    }));
-    return res.json({ success: true, tokens: result });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Remove token by id
-app.delete('/api/tokens/:id', (req, res) => {
-  try {
-    const id = req.params.id;
-    const idx = storedTokens.findIndex((t) => t.id === id);
-    if (idx === -1) return res.status(404).json({ success: false, error: 'not found' });
-    storedTokens.splice(idx, 1);
-    saveTokens(storedTokens);
-    return res.json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Start multi-bot for a target using stored tokens (selectedIds) or direct tokens
-// Body: { tokenIds?: [id,...], targetId, reactions: [...], comment }
-// If tokenIds provided, will use stored tokens by id. Otherwise tokens param (raw) can be used.
+// Start bot: choose tokens by tokenIds (stored) or raw tokens
 app.post('/api/start-bot', async (req, res) => {
   try {
     const { tokenIds, tokens, targetId, reactions, comment } = req.body;
     if (!targetId) return res.status(400).json({ success: false, error: 'targetId required' });
-    if (!reactions || !Array.isArray(reactions) || reactions.length === 0)
-      return res.status(400).json({ success: false, error: 'reactions array required' });
+    if (!reactions || !Array.isArray(reactions) || reactions.length === 0) return res.status(400).json({ success: false, error: 'reactions array required' });
 
     if (activeBots[targetId]) return res.json({ success: false, message: 'Bot already running for this targetId' });
 
-    // build accounts array {id, token}
     let accounts = [];
     if (Array.isArray(tokenIds) && tokenIds.length > 0) {
       for (const id of tokenIds) {
-        const entry = storedTokens.find((t) => t.id === id);
-        if (!entry) continue;
-        const tok = decrypt(entry.tokenEnc);
+        const e = storedTokens.find(t => t.id === id);
+        if (!e) continue;
+        const tok = decrypt(e.tokenEnc);
         if (!tok) {
-          console.warn('Failed to decrypt token for id', id);
+          pushLog({ type:'error', message:'cannot decrypt token', id: e.id });
           continue;
         }
-        accounts.push({ id: entry.id, name: entry.name, token: tok });
+        accounts.push({ id: e.id, name: e.name, token: tok });
       }
     } else if (Array.isArray(tokens) && tokens.length > 0) {
-      // raw tokens included in request (not recommended)
-      accounts = tokens.map((t, idx) => ({ id: `tmp-${idx}`, name: `tmp-${idx}`, token: t }));
+      accounts = tokens.map((t,i)=>({ id: `tmp-${i}`, name: `tmp-${i}`, token: t }));
     } else {
       return res.status(400).json({ success: false, error: 'tokenIds or tokens required' });
     }
 
-    if (accounts.length === 0) return res.status(400).json({ success: false, error: 'no valid accounts available' });
+    if (accounts.length === 0) return res.status(400).json({ success: false, error: 'no accounts available' });
 
-    const bot = {
+    activeBots[targetId] = {
       intervalId: null,
       processedPosts: new Set(),
       activatedAt: Date.now(),
       accounts,
-      meta: { reactions, comment },
+      meta: { reactions, comment }
     };
-    activeBots[targetId] = bot;
 
-    // run immediately and then interval
+    // immediately poll once and then set interval
     await pollForTarget(targetId);
-    bot.intervalId = setInterval(() => pollForTarget(targetId), 10000);
+    activeBots[targetId].intervalId = setInterval(() => pollForTarget(targetId), 10000);
+
+    pushLog({ type: 'bot:start', targetId, accounts: accounts.map(a=>a.name) });
 
     return res.json({ success: true, message: `Bot started for ${targetId} using ${accounts.length} accounts.` });
   } catch (err) {
@@ -300,38 +288,33 @@ app.post('/api/start-bot', async (req, res) => {
   }
 });
 
-// Stop bot
+// stop
 app.post('/api/stop-bot', (req, res) => {
-  try {
-    const { targetId } = req.body;
-    if (!targetId) return res.status(400).json({ success: false, error: 'targetId required' });
-    const b = activeBots[targetId];
-    if (!b) return res.json({ success: false, message: 'No active bot for this targetId' });
-    clearInterval(b.intervalId);
-    delete activeBots[targetId];
-    return res.json({ success: true, message: `Bot stopped for ${targetId}` });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
+  const { targetId } = req.body;
+  if (!targetId) return res.status(400).json({ success: false, error: 'targetId required' });
+  const b = activeBots[targetId];
+  if (!b) return res.json({ success: false, message: 'No active bot for this targetId' });
+  clearInterval(b.intervalId);
+  delete activeBots[targetId];
+  pushLog({ type: 'bot:stop', targetId });
+  res.json({ success: true, message: `Bot stopped for ${targetId}` });
 });
 
-// status
 app.get('/api/status', (req, res) => {
-  const keys = Object.keys(activeBots);
-  const status = keys.map((k) => ({
+  const bots = Object.keys(activeBots).map(k => ({
     targetId: k,
     activatedAt: new Date(activeBots[k].activatedAt).toISOString(),
-    accounts: activeBots[k].accounts.map((a) => ({ id: a.id, name: a.name })),
-    reactions: activeBots[k].meta.reactions,
+    accounts: activeBots[k].accounts.map(a => ({ id: a.id, name: a.name })),
+    reactions: activeBots[k].meta.reactions
   }));
-  res.json({ success: true, bots: status });
+  res.json({ success: true, bots });
 });
 
-/* Serve frontend */
+// serve UI
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-/* Start server */
+// start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
